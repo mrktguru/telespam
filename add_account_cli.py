@@ -42,10 +42,37 @@ async def load_from_tdata(tdata_path: str):
 
     print_header("Loading from TDATA")
 
+    # Try to resolve path
     tdata_path = Path(tdata_path)
+
+    # If not absolute, try relative to current directory
+    if not tdata_path.is_absolute():
+        # Try from current dir
+        if not tdata_path.exists():
+            # Try from script dir
+            script_dir = Path(__file__).parent
+            tdata_path = script_dir / tdata_path
+
+            if not tdata_path.exists():
+                # Try from uploads dir
+                tdata_path = script_dir / "uploads" / Path(tdata_path).name
 
     if not tdata_path.exists():
         print_error(f"Path not found: {tdata_path}")
+
+        # Show available files in uploads
+        uploads_dir = Path(__file__).parent / "uploads"
+        if uploads_dir.exists():
+            zip_files = list(uploads_dir.rglob("*.zip"))
+            tdata_folders = [d for d in uploads_dir.rglob("*") if d.is_dir() and d.name == "tdata"]
+
+            if zip_files or tdata_folders:
+                print_info("Available files in uploads/:")
+                for f in zip_files:
+                    print(f"  📦 {f.relative_to(Path(__file__).parent)}")
+                for d in tdata_folders:
+                    print(f"  📁 {d.relative_to(Path(__file__).parent)}")
+
         return False
 
     # Import converter
