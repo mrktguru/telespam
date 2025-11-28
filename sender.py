@@ -11,7 +11,7 @@ from telethon.errors import (
     PeerIdInvalidError
 )
 import config
-from sheets import sheets_manager
+from sheets_loader import sheets_manager
 from proxy import get_client, get_proxy_config
 from accounts import (
     select_account_for_user,

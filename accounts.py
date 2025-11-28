@@ -10,7 +10,7 @@ from telethon.errors import (
     PhoneNumberBannedError
 )
 import config
-from sheets import sheets_manager
+from sheets_loader import sheets_manager
 from proxy import get_client
 from uuid import uuid4
 

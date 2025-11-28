@@ -6,7 +6,7 @@ from typing import Dict, List
 from telethon import events, TelegramClient
 from datetime import datetime
 import config
-from sheets import sheets_manager
+from sheets_loader import sheets_manager
 from proxy import get_client
 
 

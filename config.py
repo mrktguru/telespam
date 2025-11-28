@@ -2,10 +2,13 @@
 
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Load environment variables (optional)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    print("Warning: python-dotenv not installed, using environment variables only")
 
 # Base directory
 BASE_DIR = Path(__file__).parent
@@ -25,6 +28,9 @@ GOOGLE_CREDENTIALS_FILE = os.getenv(
     "GOOGLE_CREDENTIALS_FILE",
     str(BASE_DIR / "credentials.json")
 )
+
+# Testing mode - use mock storage instead of Google Sheets
+USE_MOCK_STORAGE = os.getenv("USE_MOCK_STORAGE", "false").lower() == "true"
 
 # Limits
 MAX_DAILY_ACTIVE = int(os.getenv("MAX_DAILY_ACTIVE", "7"))

@@ -11,7 +11,7 @@ import asyncio
 
 import config
 from converter import detect_and_process
-from sheets import sheets_manager
+from sheets_loader import sheets_manager
 from accounts import (
     check_account_status,
     add_account,
