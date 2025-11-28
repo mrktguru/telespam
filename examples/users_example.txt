@@ -1,0 +1,11 @@
+# Telegram Users List
+# Format: username/user_id [source] [priority]
+# Lines starting with # are ignored
+
+champfreak Target 10
+durov Manual 8
+telegram Manual 7
+123456789 LinkedIn 5
+test_user1 Manual 5
+test_user2 Manual 5
+example_user Twitter 3
