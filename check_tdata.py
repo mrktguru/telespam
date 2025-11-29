@@ -68,15 +68,16 @@ async def check_single_tdata(tdata_path: Path, quiet: bool = False) -> dict:
         if not quiet:
             print(f"📁 Loading TDATA...")
 
-        # Try to load
-        tdesk = TDesktop(tdata_str)
+        # Try to load and check
+        session_path = f"/tmp/test_session_{uuid4()}"
 
-        if not quiet:
-            print("✓ TDATA loaded")
-
-        # Check if authorized
         try:
-            session_path = f"/tmp/test_session_{uuid4()}"
+            tdesk = TDesktop(tdata_str)
+
+            if not quiet:
+                print("✓ TDATA loaded")
+
+            # Try to convert to Telethon (this will fail if not authorized)
             client = await tdesk.ToTelethon(session=session_path)
 
             await client.connect()
@@ -120,7 +121,13 @@ async def check_single_tdata(tdata_path: Path, quiet: bool = False) -> dict:
 
             if not quiet:
                 print(f"\n❌ NOT AUTHORIZED")
-                print(f"   Error: {error}")
+                if "TDesktopUnauthorized" in error or "unauthorized" in error.lower():
+                    print(f"   Reason: Account not logged in")
+                else:
+                    print(f"   Error: {error}")
+
+            # Cleanup temp session if exists
+            Path(f"{session_path}.session").unlink(missing_ok=True)
 
             return {
                 'success': False,
