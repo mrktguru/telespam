@@ -86,7 +86,7 @@
                         {% for account in accounts %}
                         <div class="form-check mb-3">
                             <input class="form-check-input account-checkbox" type="checkbox"
-                                   name="accounts" value="{{ account.id }}" id="acc{{ loop.index }}">
+                                   name="accounts" value="{{ account.phone }}" id="acc{{ loop.index }}">
                             <label class="form-check-label" for="acc{{ loop.index }}">
                                 <div>
                                     <strong>{{ account.phone or 'N/A' }}</strong>
