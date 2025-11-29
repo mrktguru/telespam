@@ -167,38 +167,76 @@ python cli_menu.py
 
 ## 🌐 Деплой на продакшн
 
-### 1. Gunicorn + Systemd
+### Автоматический деплой (Рекомендуется)
+
+```bash
+cd /root/telespam/telespam
+sudo bash deploy.sh
+```
+
+Скрипт автоматически:
+- Установит gunicorn
+- Настроит systemd service
+- Настроит Nginx reverse proxy
+- Запустит все сервисы
+
+После деплоя:
+```bash
+# Установить SSL сертификат
+sudo certbot --nginx -d tgspam.mrktgu.ru
+
+# Проверить статус
+sudo systemctl status telespam-web
+
+# Смотреть логи
+sudo journalctl -u telespam-web -f
+```
+
+---
+
+### Ручной деплой (если нужно)
+
+#### 1. Установить Gunicorn
 
 ```bash
 pip install gunicorn
-
-sudo nano /etc/systemd/system/telespam-web.service
+which gunicorn  # Должно показать /usr/local/bin/gunicorn
 ```
+
+#### 2. Создать systemd service
+
+Файл: `/etc/systemd/system/telespam-web.service`
 
 ```ini
 [Unit]
-Description=Telegram Outreach Web
+Description=Telegram Outreach Web Interface
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/root/telespam/telespam
-Environment="SECRET_KEY=change-this-to-random-string"
-ExecStart=/usr/bin/gunicorn -w 4 -b 0.0.0.0:5000 web_app:app
+Environment="SECRET_KEY=change-this-to-random-secret-key"
+ExecStart=/usr/local/bin/gunicorn -w 4 -b 127.0.0.1:5000 web_app:app --timeout 120
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 ```
 
+**Важно:** Используйте `/usr/local/bin/gunicorn` (не `/usr/bin/gunicorn`)!
+
+Запустить службу:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable telespam-web
 sudo systemctl start telespam-web
+sudo systemctl status telespam-web
 ```
 
-### 2. Nginx Reverse Proxy
+#### 3. Настроить Nginx
+
+Файл: `/etc/nginx/sites-available/tgspam.mrktgu.ru`
 
 ```nginx
 server {
@@ -210,11 +248,37 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Timeout settings
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
     }
+
+    # Static files
+    location /static {
+        alias /root/telespam/telespam/static;
+        expires 30d;
+    }
+
+    client_max_body_size 100M;
 }
 ```
 
-### 3. SSL (Let's Encrypt)
+Активировать:
+```bash
+sudo ln -s /etc/nginx/sites-available/tgspam.mrktgu.ru /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+#### 4. Установить SSL
 
 ```bash
 sudo certbot --nginx -d tgspam.mrktgu.ru

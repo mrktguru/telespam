@@ -10,12 +10,18 @@ from flask import Flask, render_template, request, redirect, url_for, session, j
 from functools import wraps
 from datetime import datetime
 import asyncio
+import threading
+import time
 from pathlib import Path
+from telethon import TelegramClient
+from telethon.errors import FloodWaitError, UserPrivacyRestrictedError, PeerFloodError
+from telethon.tl.functions.users import GetFullUserRequest
 
 from database import db
 from mock_sheets import sheets_manager
 from rate_limiter import RateLimiter
 from proxy_manager import ProxyManager
+import config
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -23,6 +29,229 @@ app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 # Initialize managers
 rate_limiter = RateLimiter()
 proxy_manager = ProxyManager()
+
+
+# ============================================================================
+# CAMPAIGN RUNNER
+# ============================================================================
+
+async def send_message_to_user(account, user, message_text):
+    """Send message to user via Telegram
+
+    Returns: (success: bool, error_msg: str)
+    """
+    phone = account.get('phone')
+    session_file = Path(__file__).parent / 'sessions' / f'{phone.replace("+", "")}.session'
+
+    if not session_file.exists():
+        return False, f'Session file not found: {session_file}'
+
+    # Get proxy if assigned to account
+    proxy = None
+    if account.get('use_proxy') and account.get('proxy'):
+        proxy_id = account['proxy']
+        proxy_data = proxy_manager.get_proxy(proxy_id)
+        if proxy_data:
+            proxy = {
+                'proxy_type': proxy_data['type'],
+                'addr': proxy_data['host'],
+                'port': proxy_data['port'],
+                'username': proxy_data.get('username'),
+                'password': proxy_data.get('password')
+            }
+
+    client = TelegramClient(
+        str(session_file),
+        config.API_ID,
+        config.API_HASH,
+        proxy=proxy
+    )
+
+    try:
+        await client.connect()
+
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            return False, 'Account not authorized'
+
+        # Find user by username, user_id or phone
+        target = None
+        if user.get('username'):
+            username = user['username'].lstrip('@')
+            try:
+                target = await client.get_entity(username)
+            except Exception as e:
+                pass
+
+        if not target and user.get('user_id'):
+            try:
+                target = await client.get_entity(int(user['user_id']))
+            except Exception as e:
+                pass
+
+        if not target and user.get('phone'):
+            phone_num = user['phone']
+            try:
+                target = await client.get_entity(phone_num)
+            except Exception as e:
+                pass
+
+        if not target:
+            await client.disconnect()
+            return False, 'User not found'
+
+        # Send message
+        await client.send_message(target, message_text)
+        await client.disconnect()
+
+        return True, None
+
+    except FloodWaitError as e:
+        await client.disconnect()
+        return False, f'FloodWait: {e.seconds} seconds'
+    except UserPrivacyRestrictedError:
+        await client.disconnect()
+        return False, 'User privacy settings prevent messaging'
+    except PeerFloodError:
+        await client.disconnect()
+        return False, 'Peer flood - account limited'
+    except Exception as e:
+        await client.disconnect()
+        return False, str(e)
+
+
+def run_campaign_task(campaign_id):
+    """Run campaign in background thread"""
+    try:
+        campaign = db.get_campaign(campaign_id)
+        if not campaign:
+            return
+
+        settings = campaign.get('settings', {})
+        message = settings.get('message', '')
+        account_phones = settings.get('accounts', [])
+        user_indices = settings.get('users', [])
+
+        # Get accounts
+        all_accounts = sheets_manager.get_all_accounts()
+        accounts = [acc for acc in all_accounts if acc.get('phone') in account_phones]
+
+        # Get users
+        all_users = sheets_manager.users
+        users = [all_users[int(idx)] for idx in user_indices if int(idx) < len(all_users)]
+
+        if not accounts:
+            db.add_campaign_log(campaign_id, 'No accounts available', level='error')
+            db.update_campaign(campaign_id, status='failed')
+            return
+
+        if not users:
+            db.add_campaign_log(campaign_id, 'No users to contact', level='error')
+            db.update_campaign(campaign_id, status='failed')
+            return
+
+        db.add_campaign_log(campaign_id, f'Starting campaign: {len(accounts)} accounts, {len(users)} users', level='info')
+
+        sent_count = 0
+        failed_count = 0
+
+        # Simple round-robin sending
+        account_idx = 0
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        for user in users:
+            account = accounts[account_idx % len(accounts)]
+            account_phone = account.get('phone', 'unknown')
+
+            # Get user identifier
+            user_identifier = user.get('username') or user.get('user_id') or user.get('phone') or 'unknown'
+
+            # Check rate limit
+            if not rate_limiter.can_send(account_phone):
+                db.add_campaign_log(
+                    campaign_id,
+                    f'Rate limit exceeded for {account_phone}',
+                    level='warning'
+                )
+                account_idx += 1
+                continue
+
+            # Send message via Telegram
+            try:
+                success, error_msg = loop.run_until_complete(
+                    send_message_to_user(account, user, message)
+                )
+
+                if success:
+                    sent_count += 1
+                    rate_limiter.record_send(account_phone)
+
+                    db.add_campaign_log(
+                        campaign_id,
+                        f'✓ Sent to {user_identifier} from {account_phone}',
+                        level='success'
+                    )
+
+                    # Update user status
+                    if user.get('user_id'):
+                        sheets_manager.update_user_status(user['user_id'], 'contacted', account_phone)
+
+                    # Update account stats
+                    daily_sent = int(account.get('daily_sent', 0)) + 1
+                    total_sent = int(account.get('total_sent', 0)) + 1
+                    sheets_manager.update_account(account.get('id'), {
+                        'daily_sent': daily_sent,
+                        'total_sent': total_sent,
+                        'last_used_at': datetime.now().isoformat()
+                    })
+                else:
+                    failed_count += 1
+                    db.add_campaign_log(
+                        campaign_id,
+                        f'✗ Failed to send to {user_identifier} from {account_phone}: {error_msg}',
+                        level='error'
+                    )
+
+                    # Handle flood wait
+                    if 'FloodWait' in str(error_msg):
+                        db.add_campaign_log(
+                            campaign_id,
+                            f'Account {account_phone} hit flood wait, skipping',
+                            level='warning'
+                        )
+                        # Move to next account
+                        account_idx += 1
+
+            except Exception as e:
+                failed_count += 1
+                db.add_campaign_log(
+                    campaign_id,
+                    f'Exception sending to {user_identifier}: {str(e)}',
+                    level='error'
+                )
+
+            # Update progress
+            db.update_campaign(
+                campaign_id,
+                sent_count=sent_count,
+                failed_count=failed_count
+            )
+
+            # Delay between messages
+            time.sleep(2)
+
+            account_idx += 1
+
+        loop.close()
+
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+
+    except Exception as e:
+        db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
+        db.update_campaign(campaign_id, status='failed')
 
 
 # ============================================================================
@@ -208,9 +437,11 @@ def start_campaign(campaign_id):
 
     # Update status
     db.update_campaign(campaign_id, status='running')
-    db.add_campaign_log(campaign_id, 'Campaign started')
+    db.add_campaign_log(campaign_id, 'Campaign started', level='info')
 
-    # TODO: Start async task to run campaign
+    # Start campaign in background thread
+    thread = threading.Thread(target=run_campaign_task, args=(campaign_id,), daemon=True)
+    thread.start()
 
     return jsonify({'success': True, 'message': 'Campaign started'})
 
@@ -270,16 +501,36 @@ def users_list():
 @login_required
 def add_user():
     """Add user for outreach"""
-    username = request.form.get('username')
-    user_id = request.form.get('user_id')
-    phone = request.form.get('phone')
-    priority = int(request.form.get('priority', 1))
+    username = request.form.get('username', '').strip()
+    user_id = request.form.get('user_id', '').strip()
+    phone = request.form.get('phone', '').strip()
+    priority = request.form.get('priority', '1').strip()
+
+    # Convert user_id to int if provided and valid
+    user_id_int = None
+    if user_id:
+        try:
+            user_id_int = int(user_id)
+        except ValueError:
+            flash('Invalid user ID format', 'danger')
+            return redirect(url_for('users_list'))
+
+    # Convert priority to int
+    try:
+        priority_int = int(priority) if priority else 1
+    except ValueError:
+        priority_int = 1
+
+    # At least one identifier must be provided
+    if not username and not user_id_int and not phone:
+        flash('Please provide at least username, user ID, or phone number', 'danger')
+        return redirect(url_for('users_list'))
 
     user_data = {
-        'username': username,
-        'user_id': int(user_id) if user_id else None,
-        'phone': phone,
-        'priority': priority,
+        'username': username if username else None,
+        'user_id': user_id_int,
+        'phone': phone if phone else None,
+        'priority': priority_int,
         'status': 'pending'
     }
 
