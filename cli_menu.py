@@ -104,6 +104,7 @@ async def main_menu():
         print("🔧 SETUP:")
         print("  1. Add account (TDATA/SESSION/JSON)")
         print("  1a. Add account manually (phone + API credentials)")
+        print("  1b. Add account from session data (AUTH KEY + DC ID)")
         print("  2. Add users for outreach")
         print("  3. View system status")
         print()
@@ -130,6 +131,9 @@ async def main_menu():
 
         elif choice == "1a" or choice.lower() == "1a":
             run_script("add_account_manual.py")
+
+        elif choice == "1b" or choice.lower() == "1b":
+            run_script("add_account_from_session_data.py")
 
         elif choice == "2":
             run_script("add_users_cli.py")
