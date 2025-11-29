@@ -185,7 +185,7 @@ def run_campaign_task(campaign_id):
 
                 if success:
                     sent_count += 1
-                    rate_limiter.record_send(account_phone)
+                    rate_limiter.record_sent(account_phone)
 
                     db.add_campaign_log(
                         campaign_id,
