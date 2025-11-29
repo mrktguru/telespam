@@ -27,9 +27,64 @@
 
                     <div class="mb-3">
                         <label for="message" class="form-label">Message *</label>
+                        
+                        <!-- Text Formatting Toolbar -->
+                        <div class="btn-toolbar mb-2" role="toolbar">
+                            <div class="btn-group btn-group-sm me-2" role="group">
+                                <button type="button" class="btn btn-outline-secondary" onclick="insertFormat('b')" title="Bold">
+                                    <i class="bi bi-type-bold"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="insertFormat('i')" title="Italic">
+                                    <i class="bi bi-type-italic"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="insertFormat('u')" title="Underline">
+                                    <i class="bi bi-type-underline"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="insertFormat('s')" title="Strikethrough">
+                                    <i class="bi bi-type-strikethrough"></i>
+                                </button>
+                            </div>
+                            <div class="btn-group btn-group-sm me-2" role="group">
+                                <button type="button" class="btn btn-outline-secondary" onclick="insertFormat('code')" title="Code">
+                                    <i class="bi bi-code"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="insertFormat('pre')" title="Code Block">
+                                    <i class="bi bi-code-square"></i>
+                                </button>
+                            </div>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button type="button" class="btn btn-outline-secondary" onclick="insertEmoji('😊')" title="Emoji">
+                                    😊
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="insertEmoji('👍')" title="Emoji">
+                                    👍
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="insertEmoji('❤️')" title="Emoji">
+                                    ❤️
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="insertEmoji('🔥')" title="Emoji">
+                                    🔥
+                                </button>
+                            </div>
+                        </div>
+                        
                         <textarea class="form-control" id="message" name="message" rows="6" required
                                   placeholder="Enter your message..."></textarea>
-                        <small class="text-muted">This message will be sent to all selected users</small>
+                        <small class="text-muted">Supports Telegram HTML formatting</small>
+                    </div>
+
+                    <!-- Media Upload -->
+                    <div class="mb-3">
+                        <label for="mediaFile" class="form-label">Attach Media (Optional)</label>
+                        <input type="file" class="form-control" id="mediaFile" name="media" 
+                               accept="image/*,video/*,audio/*" onchange="previewMedia(event)">
+                        <small class="text-muted">Supported: Images (jpg, png, gif), Video (mp4), Audio (mp3, ogg)</small>
+                        <div id="mediaPreview" class="mt-2" style="display: none;">
+                            <div class="alert alert-info">
+                                <i class="bi bi-file-earmark"></i> <span id="mediaFileName"></span>
+                                <button type="button" class="btn-close float-end" onclick="clearMedia()"></button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -206,6 +261,56 @@ function handleCSVUpload(event) {
         status.classList.add('alert-danger');
         status.innerHTML = `<i class="bi bi-x-circle"></i> Error: ${error}`;
     });
+}
+
+// Text Formatting
+function insertFormat(tag) {
+    const textarea = document.getElementById('message');
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = textarea.value.substring(start, end);
+    
+    let formattedText;
+    if (selectedText) {
+        // Wrap selected text
+        formattedText = `<${tag}>${selectedText}</${tag}>`;
+    } else {
+        // Insert empty tags
+        formattedText = `<${tag}></${tag}>`;
+    }
+    
+    textarea.value = textarea.value.substring(0, start) + formattedText + textarea.value.substring(end);
+    
+    // Set cursor position
+    const cursorPos = start + tag.length + 2 + (selectedText ? selectedText.length : 0);
+    textarea.setSelectionRange(cursorPos, cursorPos);
+    textarea.focus();
+}
+
+function insertEmoji(emoji) {
+    const textarea = document.getElementById('message');
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    
+    textarea.value = textarea.value.substring(0, start) + emoji + textarea.value.substring(end);
+    
+    const cursorPos = start + emoji.length;
+    textarea.setSelectionRange(cursorPos, cursorPos);
+    textarea.focus();
+}
+
+// Media Preview
+function previewMedia(event) {
+    const file = event.target.files[0];
+    if (file) {
+        document.getElementById('mediaFileName').textContent = file.name;
+        document.getElementById('mediaPreview').style.display = 'block';
+    }
+}
+
+function clearMedia() {
+    document.getElementById('mediaFile').value = '';
+    document.getElementById('mediaPreview').style.display = 'none';
 }
 </script>
 {% endblock %}

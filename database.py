@@ -96,6 +96,8 @@ class Database:
                 conversation_id INTEGER NOT NULL,
                 direction TEXT NOT NULL,
                 message_text TEXT NOT NULL,
+                media_path TEXT,
+                media_type TEXT,
                 sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 status TEXT DEFAULT 'sent',
                 FOREIGN KEY (conversation_id) REFERENCES campaign_conversations (id)
