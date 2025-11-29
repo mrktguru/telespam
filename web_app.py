@@ -466,6 +466,38 @@ def campaign_progress(campaign_id):
     return jsonify(progress)
 
 
+@app.route('/campaigns/<int:campaign_id>/delete', methods=['POST'])
+@login_required
+def delete_campaign(campaign_id):
+    """Delete a campaign"""
+    try:
+        campaign = db.get_campaign(campaign_id)
+        
+        if not campaign:
+            flash('Campaign not found', 'danger')
+            return redirect(url_for('campaigns'))
+        
+        # Check if user owns this campaign
+        if campaign['user_id'] != session['user_id']:
+            flash('Unauthorized', 'danger')
+            return redirect(url_for('campaigns'))
+        
+        # Delete campaign from database
+        success = db.delete_campaign(campaign_id)
+        
+        if success:
+            flash(f'Campaign "{campaign["name"]}" deleted successfully', 'success')
+        else:
+            flash('Error deleting campaign', 'danger')
+    
+    except Exception as e:
+        flash(f'Error: {str(e)}', 'danger')
+        import traceback
+        traceback.print_exc()
+    
+    return redirect(url_for('campaigns'))
+
+
 # ============================================================================
 # ACCOUNT ROUTES
 # ============================================================================
