@@ -13,11 +13,15 @@ import asyncio
 import threading
 import time
 from pathlib import Path
+from telethon import TelegramClient
+from telethon.errors import FloodWaitError, UserPrivacyRestrictedError, PeerFloodError
+from telethon.tl.functions.users import GetFullUserRequest
 
 from database import db
 from mock_sheets import sheets_manager
 from rate_limiter import RateLimiter
 from proxy_manager import ProxyManager
+import config
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -30,6 +34,91 @@ proxy_manager = ProxyManager()
 # ============================================================================
 # CAMPAIGN RUNNER
 # ============================================================================
+
+async def send_message_to_user(account, user, message_text):
+    """Send message to user via Telegram
+
+    Returns: (success: bool, error_msg: str)
+    """
+    phone = account.get('phone')
+    session_file = Path(__file__).parent / 'sessions' / f'{phone.replace("+", "")}.session'
+
+    if not session_file.exists():
+        return False, f'Session file not found: {session_file}'
+
+    # Get proxy if assigned to account
+    proxy = None
+    if account.get('use_proxy') and account.get('proxy'):
+        proxy_id = account['proxy']
+        proxy_data = proxy_manager.get_proxy(proxy_id)
+        if proxy_data:
+            proxy = {
+                'proxy_type': proxy_data['type'],
+                'addr': proxy_data['host'],
+                'port': proxy_data['port'],
+                'username': proxy_data.get('username'),
+                'password': proxy_data.get('password')
+            }
+
+    client = TelegramClient(
+        str(session_file),
+        config.API_ID,
+        config.API_HASH,
+        proxy=proxy
+    )
+
+    try:
+        await client.connect()
+
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            return False, 'Account not authorized'
+
+        # Find user by username, user_id or phone
+        target = None
+        if user.get('username'):
+            username = user['username'].lstrip('@')
+            try:
+                target = await client.get_entity(username)
+            except Exception as e:
+                pass
+
+        if not target and user.get('user_id'):
+            try:
+                target = await client.get_entity(int(user['user_id']))
+            except Exception as e:
+                pass
+
+        if not target and user.get('phone'):
+            phone_num = user['phone']
+            try:
+                target = await client.get_entity(phone_num)
+            except Exception as e:
+                pass
+
+        if not target:
+            await client.disconnect()
+            return False, 'User not found'
+
+        # Send message
+        await client.send_message(target, message_text)
+        await client.disconnect()
+
+        return True, None
+
+    except FloodWaitError as e:
+        await client.disconnect()
+        return False, f'FloodWait: {e.seconds} seconds'
+    except UserPrivacyRestrictedError:
+        await client.disconnect()
+        return False, 'User privacy settings prevent messaging'
+    except PeerFloodError:
+        await client.disconnect()
+        return False, 'Peer flood - account limited'
+    except Exception as e:
+        await client.disconnect()
+        return False, str(e)
+
 
 def run_campaign_task(campaign_id):
     """Run campaign in background thread"""
@@ -68,6 +157,9 @@ def run_campaign_task(campaign_id):
 
         # Simple round-robin sending
         account_idx = 0
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
         for user in users:
             account = accounts[account_idx % len(accounts)]
             account_phone = account.get('phone', 'unknown')
@@ -75,29 +167,67 @@ def run_campaign_task(campaign_id):
             # Get user identifier
             user_identifier = user.get('username') or user.get('user_id') or user.get('phone') or 'unknown'
 
-            # Simulate sending (replace with actual Telegram sending later)
-            time.sleep(1)  # Simulate delay
-
-            # Random success/failure for demo
-            import random
-            success = random.random() > 0.1  # 90% success rate for demo
-
-            if success:
-                sent_count += 1
+            # Check rate limit
+            if not rate_limiter.can_send(account_phone):
                 db.add_campaign_log(
                     campaign_id,
-                    f'Sent to {user_identifier} from {account_phone}',
-                    level='success'
+                    f'Rate limit exceeded for {account_phone}',
+                    level='warning'
+                )
+                account_idx += 1
+                continue
+
+            # Send message via Telegram
+            try:
+                success, error_msg = loop.run_until_complete(
+                    send_message_to_user(account, user, message)
                 )
 
-                # Update user status
-                if user.get('user_id'):
-                    sheets_manager.update_user_status(user['user_id'], 'contacted', account_phone)
-            else:
+                if success:
+                    sent_count += 1
+                    rate_limiter.record_send(account_phone)
+
+                    db.add_campaign_log(
+                        campaign_id,
+                        f'✓ Sent to {user_identifier} from {account_phone}',
+                        level='success'
+                    )
+
+                    # Update user status
+                    if user.get('user_id'):
+                        sheets_manager.update_user_status(user['user_id'], 'contacted', account_phone)
+
+                    # Update account stats
+                    daily_sent = int(account.get('daily_sent', 0)) + 1
+                    total_sent = int(account.get('total_sent', 0)) + 1
+                    sheets_manager.update_account(account.get('id'), {
+                        'daily_sent': daily_sent,
+                        'total_sent': total_sent,
+                        'last_used_at': datetime.now().isoformat()
+                    })
+                else:
+                    failed_count += 1
+                    db.add_campaign_log(
+                        campaign_id,
+                        f'✗ Failed to send to {user_identifier} from {account_phone}: {error_msg}',
+                        level='error'
+                    )
+
+                    # Handle flood wait
+                    if 'FloodWait' in str(error_msg):
+                        db.add_campaign_log(
+                            campaign_id,
+                            f'Account {account_phone} hit flood wait, skipping',
+                            level='warning'
+                        )
+                        # Move to next account
+                        account_idx += 1
+
+            except Exception as e:
                 failed_count += 1
                 db.add_campaign_log(
                     campaign_id,
-                    f'Failed to send to {user_identifier} from {account_phone}',
+                    f'Exception sending to {user_identifier}: {str(e)}',
                     level='error'
                 )
 
@@ -108,7 +238,12 @@ def run_campaign_task(campaign_id):
                 failed_count=failed_count
             )
 
+            # Delay between messages
+            time.sleep(2)
+
             account_idx += 1
+
+        loop.close()
 
         # Mark as completed
         db.update_campaign(campaign_id, status='completed')
