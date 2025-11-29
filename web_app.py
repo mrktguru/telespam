@@ -528,16 +528,23 @@ def edit_account(account_id):
             photos = request.files.getlist('photos')
             photo_paths = []
             
-            if photos:
-                upload_dir = Path(__file__).parent / 'uploads' / 'profile_photos'
-                upload_dir.mkdir(parents=True, exist_ok=True)
-                
-                for photo in photos:
-                    if photo and photo.filename:
-                        filename = f"{account_id}_{photo.filename}"
-                        filepath = upload_dir / filename
-                        photo.save(str(filepath))
-                        photo_paths.append(str(filepath))
+            print(f"DEBUG: Received {len(photos)} photo(s)")
+            
+            for photo in photos:
+                if photo and photo.filename:
+                    upload_dir = Path(__file__).parent / 'uploads' / 'profile_photos'
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Generate unique filename
+                    import time
+                    timestamp = int(time.time())
+                    filename = f"{account_id}_{timestamp}_{photo.filename}"
+                    filepath = upload_dir / filename
+                    
+                    # Save file
+                    photo.save(str(filepath))
+                    photo_paths.append(str(filepath))
+                    print(f"DEBUG: Saved photo to {filepath}")
             
             # Get session file
             phone = account.get('phone', '')
@@ -561,7 +568,13 @@ def edit_account(account_id):
                     if not await client.is_user_authorized():
                         return False, 'Account not authorized'
                     
-                    await update_full_profile(
+                    print(f"DEBUG: Calling update_full_profile with:")
+                    print(f"  - first_name: {first_name or None}")
+                    print(f"  - last_name: {last_name or None}")
+                    print(f"  - bio: {bio or None}")
+                    print(f"  - photo_paths: {photo_paths if photo_paths else None}")
+                    
+                    result = await update_full_profile(
                         client,
                         first_name=first_name or None,
                         last_name=last_name or None,
@@ -569,13 +582,18 @@ def edit_account(account_id):
                         photo_paths=photo_paths if photo_paths else None
                     )
                     
+                    print(f"DEBUG: update_full_profile returned: {result}")
+                    
                     # Get updated info
                     info = await get_account_info(client)
+                    
+                    print(f"DEBUG: Account info after update: {info}")
                     
                     return True, info
                 
                 except Exception as e:
                     import traceback
+                    print("DEBUG: Exception occurred:")
                     traceback.print_exc()
                     return False, str(e)
                 

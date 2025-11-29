@@ -157,18 +157,22 @@ async def upload_multiple_photos(client: TelegramClient, photo_paths: List[str],
         List of uploaded photo objects
     """
     results = []
+    
+    print(f"DEBUG upload_multiple_photos: Received {len(photo_paths)} photos")
 
     for i, photo_path in enumerate(photo_paths):
         try:
-            # First photo replaces all existing photos
-            replace_all = (i == 0 and replace_existing)
-            result = await update_account_photo(client, photo_path, replace_all=replace_all)
+            print(f"DEBUG: Uploading photo {i+1}/{len(photo_paths)}: {photo_path}")
+            result = await update_account_photo(client, photo_path)
             results.append(result)
-            print(f"✓ Uploaded photo {i+1}/{len(photo_paths)}")
+            print(f"DEBUG: Successfully uploaded photo {i+1}")
             await asyncio.sleep(2)  # Delay between uploads
         except Exception as e:
-            print(f"✗ Failed to upload {photo_path}: {e}")
+            print(f"ERROR: Failed to upload {photo_path}: {e}")
+            import traceback
+            traceback.print_exc()
 
+    print(f"DEBUG: Uploaded {len(results)} photos successfully")
     return results
 
 
