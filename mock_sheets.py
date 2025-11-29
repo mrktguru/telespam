@@ -62,6 +62,12 @@ class MockSheetsManager:
 
     def add_account(self, account: Dict) -> bool:
         """Add new account"""
+        # If campaign_id is provided, update account ID to include it
+        if account.get('campaign_id') and account.get('phone'):
+            # Format: acc_{phone}_{campaign_id}
+            phone_clean = account['phone'].replace('+', '').replace(' ', '')
+            account['id'] = f"acc_{phone_clean}_{account['campaign_id']}"
+        
         self.accounts.append(account)
         self._save_to_file()
         print(f"✓ Account added: {account.get('id')} - {account.get('phone')}")

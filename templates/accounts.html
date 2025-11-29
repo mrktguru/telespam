@@ -38,6 +38,13 @@
                     <i class="bi bi-hash"></i> {{ account.id }}
                 </p>
 
+                {% if account.campaign_id %}
+                <p class="mb-2">
+                    <i class="bi bi-megaphone"></i> Campaign: 
+                    <span class="badge bg-primary">#{{ account.campaign_id }}</span>
+                </p>
+                {% endif %}
+
                 <hr>
 
                 <div class="row text-center small">
