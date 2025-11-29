@@ -154,11 +154,14 @@ async def add_account_from_session_data():
         except ValueError:
             print("⚠️  Invalid USER ID, skipping...")
 
-    # Create session directory
+    # Normalize phone and create session directory
+    from phone_utils import normalize_phone, phone_to_filename
+
+    phone = normalize_phone(phone)
+    session_name = phone_to_filename(phone)
+
     sessions_dir = Path(__file__).parent / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
-
-    session_name = phone.replace('+', '').replace(' ', '')
     session_file = sessions_dir / f"{session_name}.session"
 
     print()

@@ -51,8 +51,14 @@ async def create_session():
         print("❌ Phone number is required!")
         sys.exit(1)
 
+    # Normalize phone and create session file
+    from phone_utils import normalize_phone, phone_to_filename
+
+    phone = normalize_phone(phone)
+    session_name = phone_to_filename(phone)
+
     # Create session file
-    session_file = Path(__file__).parent / "sessions" / f"{phone}.session"
+    session_file = Path(__file__).parent / "sessions" / f"{session_name}.session"
     session_file.parent.mkdir(parents=True, exist_ok=True)
 
     print()
