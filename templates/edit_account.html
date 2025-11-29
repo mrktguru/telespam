@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Profile - {{ account.phone }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 fw-bold">Edit Account Profile</h1>
+    <a href="{{ url_for('accounts_list') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Accounts
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-md-8 mx-auto">
+        <!-- Current Profile Info -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Current Profile</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Phone:</strong> {{ account.phone or 'N/A' }}</p>
+                        <p><strong>Username:</strong> @{{ account.username or 'N/A' }}</p>
+                        <p><strong>Name:</strong> {{ account.first_name }} {{ account.last_name or '' }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Account ID:</strong> {{ account.id }}</p>
+                        <p><strong>Status:</strong> 
+                            <span class="badge bg-{{ 'success' if account.status == 'active' else 'warning' if account.status == 'warming' else 'secondary' }}">
+                                {{ account.status }}
+                            </span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Edit Form -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Update Profile</h5>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('edit_account', account_id=account.id) }}" method="POST" enctype="multipart/form-data">
+                    <!-- Name Fields -->
+                    <div class="mb-3">
+                        <label for="first_name" class="form-label">
+                            First Name
+                            <small class="text-muted">(leave empty to keep current)</small>
+                        </label>
+                        <input 
+                            type="text" 
+                            class="form-control" 
+                            id="first_name" 
+                            name="first_name" 
+                            placeholder="{{ account.first_name }}"
+                            maxlength="64"
+                        >
+                        <div class="form-text">Max 64 characters</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="last_name" class="form-label">
+                            Last Name
+                            <small class="text-muted">(leave empty to keep current)</small>
+                        </label>
+                        <input 
+                            type="text" 
+                            class="form-control" 
+                            id="last_name" 
+                            name="last_name" 
+                            placeholder="{{ account.last_name or '' }}"
+                            maxlength="64"
+                        >
+                        <div class="form-text">Max 64 characters</div>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <!-- Bio Field -->
+                    <div class="mb-3">
+                        <label for="bio" class="form-label">
+                            Bio (About)
+                            <small class="text-muted">(leave empty to keep current)</small>
+                        </label>
+                        <textarea 
+                            class="form-control" 
+                            id="bio" 
+                            name="bio" 
+                            rows="3" 
+                            maxlength="70"
+                            placeholder="Your bio text..."
+                        ></textarea>
+                        <div class="form-text">Max 70 characters. This appears in your profile as "About".</div>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <!-- Photo Upload -->
+                    <div class="mb-3">
+                        <label for="photos" class="form-label">
+                            Profile Photos
+                            <small class="text-muted">(optional)</small>
+                        </label>
+                        <input 
+                            type="file" 
+                            class="form-control" 
+                            id="photos" 
+                            name="photos" 
+                            accept="image/*"
+                            multiple
+                        >
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i>
+                            You can upload multiple photos to create a carousel. The first photo will become your profile picture.
+                            <br>
+                            Supported formats: JPG, PNG. Max file size: 10MB each.
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info" role="alert">
+                        <i class="bi bi-lightbulb"></i> 
+                        <strong>Tip:</strong> Leave fields empty if you only want to update specific fields. Only filled fields will be updated.
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="bi bi-check-circle"></i> Update Profile
+                        </button>
+                        <a href="{{ url_for('accounts_list') }}" class="btn btn-outline-secondary">
+                            Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Instructions -->
+        <div class="card mt-4">
+            <div class="card-header bg-light">
+                <h6 class="mb-0"><i class="bi bi-question-circle"></i> How This Works</h6>
+            </div>
+            <div class="card-body">
+                <ul class="mb-0">
+                    <li>This form updates your <strong>Telegram profile</strong> directly via the Telegram API</li>
+                    <li>Changes will be visible to everyone on Telegram</li>
+                    <li>Profile photos are uploaded in the order selected (first = main profile photo)</li>
+                    <li>Bio updates are limited to 70 characters by Telegram</li>
+                    <li>The session must be authorized for changes to work</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .form-control:focus {
+        border-color: #0d6efd;
+        box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+    }
+    
+    .card {
+        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    }
+</style>
+{% endblock %}
