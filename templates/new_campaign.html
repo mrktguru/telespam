@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block title %}New Campaign - Telegram Outreach{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 fw-bold">Create New Campaign</h1>
+    <a href="{{ url_for('campaigns') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back
+    </a>
+</div>
+
+<form method="POST">
+    <div class="row">
+        <div class="col-lg-8">
+            <!-- Campaign Details -->
+            <div class="card mb-4">
+                <div class="card-header bg-white">
+                    <h5 class="card-title mb-0">Campaign Details</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Campaign Name *</label>
+                        <input type="text" class="form-control" id="name" name="name" required
+                               placeholder="e.g., Product Launch Outreach">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="message" class="form-label">Message *</label>
+                        <textarea class="form-control" id="message" name="message" rows="6" required
+                                  placeholder="Enter your message..."></textarea>
+                        <small class="text-muted">This message will be sent to all selected users</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Select Users -->
+            <div class="card mb-4">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Select Users</h5>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllUsers()">
+                        Select All
+                    </button>
+                </div>
+                <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                    {% if users %}
+                        {% for user in users %}
+                        <div class="form-check mb-2">
+                            <input class="form-check-input user-checkbox" type="checkbox"
+                                   name="users" value="{{ loop.index0 }}" id="user{{ loop.index }}">
+                            <label class="form-check-label" for="user{{ loop.index }}">
+                                <strong>@{{ user.username or 'N/A' }}</strong>
+                                {% if user.user_id %}
+                                    <small class="text-muted">(ID: {{ user.user_id }})</small>
+                                {% endif %}
+                                <span class="badge bg-{{ 'info' if user.status == 'pending' else 'secondary' }} ms-2">
+                                    {{ user.status }}
+                                </span>
+                            </label>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="bi bi-people" style="font-size: 2rem;"></i>
+                            <p class="mt-2 mb-0">No users available. Add users first.</p>
+                            <a href="{{ url_for('users_list') }}" class="btn btn-sm btn-primary mt-2">
+                                Add Users
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <!-- Select Accounts -->
+            <div class="card mb-4">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Select Accounts</h5>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllAccounts()">
+                        Select All
+                    </button>
+                </div>
+                <div class="card-body">
+                    {% if accounts %}
+                        {% for account in accounts %}
+                        <div class="form-check mb-3">
+                            <input class="form-check-input account-checkbox" type="checkbox"
+                                   name="accounts" value="{{ account.id }}" id="acc{{ loop.index }}">
+                            <label class="form-check-label" for="acc{{ loop.index }}">
+                                <div>
+                                    <strong>{{ account.phone or 'N/A' }}</strong>
+                                    <br>
+                                    <small class="text-muted">{{ account.first_name }}</small>
+                                    <br>
+                                    <span class="badge bg-{{ 'success' if account.status == 'active' else 'warning' }}">
+                                        {{ account.status }}
+                                    </span>
+                                </div>
+                            </label>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="bi bi-person-circle" style="font-size: 2rem;"></i>
+                            <p class="mt-2 mb-0">No accounts available</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Summary -->
+            <div class="card">
+                <div class="card-header bg-white">
+                    <h5 class="card-title mb-0">Summary</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-6">Accounts:</dt>
+                        <dd class="col-sm-6"><span id="accountCount">0</span> selected</dd>
+
+                        <dt class="col-sm-6">Users:</dt>
+                        <dd class="col-sm-6"><span id="userCount">0</span> selected</dd>
+                    </dl>
+
+                    <hr>
+
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-rocket-takeoff"></i> Create Campaign
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function updateCounts() {
+    const accountCount = document.querySelectorAll('.account-checkbox:checked').length;
+    const userCount = document.querySelectorAll('.user-checkbox:checked').length;
+
+    document.getElementById('accountCount').textContent = accountCount;
+    document.getElementById('userCount').textContent = userCount;
+}
+
+function selectAllAccounts() {
+    const checkboxes = document.querySelectorAll('.account-checkbox');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    checkboxes.forEach(cb => cb.checked = !allChecked);
+    updateCounts();
+}
+
+function selectAllUsers() {
+    const checkboxes = document.querySelectorAll('.user-checkbox');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    checkboxes.forEach(cb => cb.checked = !allChecked);
+    updateCounts();
+}
+
+document.querySelectorAll('.account-checkbox, .user-checkbox').forEach(cb => {
+    cb.addEventListener('change', updateCounts);
+});
+
+updateCounts();
+</script>
+{% endblock %}

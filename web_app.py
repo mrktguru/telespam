@@ -293,12 +293,27 @@ def add_user():
 # PROXY ROUTES
 # ============================================================================
 
-@app.route('/proxies')
+@app.route('/proxies', methods=['GET', 'POST'])
 @login_required
 def proxies_list():
-    """List all proxies"""
-    proxies = proxy_manager.get_all_proxies()
+    """List all proxies and handle testing"""
+    if request.method == 'POST':
+        action = request.form.get('action')
+        proxy_id = request.form.get('proxy_id')
 
+        if action == 'test' and proxy_id:
+            # Test proxy
+            import asyncio
+            result = asyncio.run(proxy_manager.test_proxy(proxy_id))
+
+            if result:
+                flash(f'Proxy {proxy_id} is working!', 'success')
+            else:
+                flash(f'Proxy {proxy_id} failed test', 'danger')
+
+            return redirect(url_for('proxies_list'))
+
+    proxies = proxy_manager.get_all_proxies()
     return render_template('proxies.html', proxies=proxies)
 
 
