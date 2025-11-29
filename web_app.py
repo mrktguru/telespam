@@ -555,13 +555,12 @@ def edit_account(account_id):
                     config.API_HASH
                 )
                 
-                await client.connect()
-                
-                if not await client.is_user_authorized():
-                    await client.disconnect()
-                    return False, 'Account not authorized'
-                
                 try:
+                    await client.connect()
+                    
+                    if not await client.is_user_authorized():
+                        return False, 'Account not authorized'
+                    
                     await update_full_profile(
                         client,
                         first_name=first_name or None,
@@ -572,13 +571,19 @@ def edit_account(account_id):
                     
                     # Get updated info
                     info = await get_account_info(client)
-                    await client.disconnect()
                     
                     return True, info
                 
                 except Exception as e:
-                    await client.disconnect()
+                    import traceback
+                    traceback.print_exc()
                     return False, str(e)
+                
+                finally:
+                    try:
+                        await client.disconnect()
+                    except:
+                        pass
             
             # Run update
             success, result = asyncio.run(update_profile())
