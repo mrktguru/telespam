@@ -193,6 +193,26 @@ def run_campaign_task(campaign_id):
                         level='success'
                     )
 
+                    # Save conversation to database
+                    try:
+                        # Get IP address (proxy or current)
+                        ip_address = account.get('proxy_host') if account.get('use_proxy') else 'current'
+                        
+                        # Create or get conversation
+                        conv_id = db.create_conversation(
+                            campaign_id=campaign_id,
+                            sender_account_id=account.get('id'),
+                            recipient_user_id=str(user.get('user_id', user_identifier)),
+                            recipient_username=user.get('username'),
+                            ip_address=ip_address
+                        )
+                        
+                        # Add outgoing message
+                        if conv_id:
+                            db.add_message(conv_id, 'outgoing', message)
+                    except Exception as conv_error:
+                        print(f"Warning: Could not save conversation: {conv_error}")
+
                     # Update user status
                     if user.get('user_id'):
                         sheets_manager.update_user_status(user['user_id'], 'contacted', account_phone)
@@ -439,8 +459,11 @@ def campaign_detail(campaign_id):
 
     # Get logs
     logs = db.get_campaign_logs(campaign_id, limit=100)
+    
+    # Get conversations
+    conversations = db.get_campaign_conversations(campaign_id)
 
-    return render_template('campaign_detail.html', campaign=campaign, logs=logs)
+    return render_template('campaign_detail.html', campaign=campaign, logs=logs, conversations=conversations)
 
 
 @app.route('/campaigns/<int:campaign_id>/start', methods=['POST'])
@@ -513,6 +536,106 @@ def delete_campaign(campaign_id):
         traceback.print_exc()
     
     return redirect(url_for('campaigns'))
+
+
+# ============================================================================
+# CONVERSATION ROUTES
+# ============================================================================
+
+@app.route('/conversations/<int:conversation_id>')
+@login_required
+def view_conversation(conversation_id):
+    """View conversation history and send new messages"""
+    conversation = db.get_conversation(conversation_id)
+    
+    if not conversation:
+        flash('Conversation not found', 'danger')
+        return redirect(url_for('campaigns'))
+    
+    # Get messages
+    messages = db.get_conversation_messages(conversation_id)
+    
+    # Get campaign info
+    campaign = db.get_campaign(conversation['campaign_id'])
+    
+    return render_template('conversation.html', 
+                         conversation=conversation, 
+                         messages=messages,
+                         campaign=campaign)
+
+
+@app.route('/conversations/<int:conversation_id>/send', methods=['POST'])
+@login_required
+def send_conversation_message(conversation_id):
+    """Send a new message in the conversation"""
+    conversation = db.get_conversation(conversation_id)
+    
+    if not conversation:
+        return jsonify({'error': 'Conversation not found'}), 404
+    
+    message_text = request.form.get('message')
+    if not message_text:
+        flash('Message text is required', 'danger')
+        return redirect(url_for('view_conversation', conversation_id=conversation_id))
+    
+    # Get account
+    account = sheets_manager.get_account(conversation['sender_account_id'])
+    if not account:
+        flash('Sender account not found', 'danger')
+        return redirect(url_for('view_conversation', conversation_id=conversation_id))
+    
+    # Send message via Telegram
+    try:
+        import asyncio
+        from start_outreach_cli import send_message_to_user
+        
+        # Create user object
+        user = {
+            'user_id': conversation['recipient_user_id'],
+            'username': conversation['recipient_username']
+        }
+        
+        # Get settings
+        settings = sheets_manager.get_settings()
+        
+        # Send message
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            send_message_to_user(account, user, message_text, settings)
+        )
+        loop.close()
+        
+        if result.get('success'):
+            # Save message to database
+            db.add_message(conversation_id, 'outgoing', message_text)
+            flash('Message sent successfully', 'success')
+        else:
+            flash(f'Failed to send message: {result.get("error")}', 'danger')
+            
+    except Exception as e:
+        flash(f'Error sending message: {str(e)}', 'danger')
+    
+    return redirect(url_for('view_conversation', conversation_id=conversation_id))
+
+
+@app.route('/conversations/<int:conversation_id>/delete', methods=['POST'])
+@login_required
+def delete_conversation(conversation_id):
+    """Delete a conversation"""
+    conversation = db.get_conversation(conversation_id)
+    
+    if not conversation:
+        return jsonify({'error': 'Conversation not found'}), 404
+    
+    campaign_id = conversation['campaign_id']
+    
+    if db.delete_conversation(conversation_id):
+        flash('Conversation deleted successfully', 'success')
+    else:
+        flash('Failed to delete conversation', 'danger')
+    
+    return redirect(url_for('campaign_detail', campaign_id=campaign_id))
 
 
 # ============================================================================

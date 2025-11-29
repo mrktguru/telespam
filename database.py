@@ -74,6 +74,34 @@ class Database:
             )
         ''')
 
+        # Campaign conversations table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS campaign_conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                sender_account_id TEXT NOT NULL,
+                recipient_user_id TEXT NOT NULL,
+                recipient_username TEXT,
+                ip_address TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_message_at TIMESTAMP,
+                FOREIGN KEY (campaign_id) REFERENCES campaigns (id)
+            )
+        ''')
+
+        # Campaign messages table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS campaign_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER NOT NULL,
+                direction TEXT NOT NULL,
+                message_text TEXT NOT NULL,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'sent',
+                FOREIGN KEY (conversation_id) REFERENCES campaign_conversations (id)
+            )
+        ''')
+
         conn.commit()
         conn.close()
 
@@ -374,6 +402,154 @@ class Database:
             logs.append(log)
 
         return logs
+
+    # ========================================================================
+    # CAMPAIGN CONVERSATIONS
+    # ========================================================================
+
+    def create_conversation(self, campaign_id: int, sender_account_id: str, 
+                          recipient_user_id: str, recipient_username: str = None,
+                          ip_address: str = None) -> Optional[int]:
+        """Create or get conversation for campaign"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            # Check if conversation already exists
+            cursor.execute(
+                '''SELECT id FROM campaign_conversations
+                WHERE campaign_id = ? AND sender_account_id = ? AND recipient_user_id = ?''',
+                (campaign_id, sender_account_id, recipient_user_id)
+            )
+            
+            row = cursor.fetchone()
+            if row:
+                return row[0]
+
+            # Create new conversation
+            cursor.execute(
+                '''INSERT INTO campaign_conversations 
+                (campaign_id, sender_account_id, recipient_user_id, recipient_username, ip_address, last_message_at)
+                VALUES (?, ?, ?, ?, ?, ?)''',
+                (campaign_id, sender_account_id, recipient_user_id, recipient_username, 
+                 ip_address, datetime.now().isoformat())
+            )
+
+            conn.commit()
+            conversation_id = cursor.lastrowid
+            return conversation_id
+
+        except Exception as e:
+            print(f"Error creating conversation: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def add_message(self, conversation_id: int, direction: str, message_text: str) -> bool:
+        """Add message to conversation (direction: 'outgoing' or 'incoming')"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute(
+                '''INSERT INTO campaign_messages 
+                (conversation_id, direction, message_text, sent_at)
+                VALUES (?, ?, ?, ?)''',
+                (conversation_id, direction, message_text, datetime.now().isoformat())
+            )
+
+            # Update last_message_at in conversation
+            cursor.execute(
+                '''UPDATE campaign_conversations 
+                SET last_message_at = ? 
+                WHERE id = ?''',
+                (datetime.now().isoformat(), conversation_id)
+            )
+
+            conn.commit()
+            return True
+
+        except Exception as e:
+            print(f"Error adding message: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def get_campaign_conversations(self, campaign_id: int) -> List[Dict]:
+        """Get all conversations for a campaign"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            '''SELECT * FROM campaign_conversations
+            WHERE campaign_id = ?
+            ORDER BY last_message_at DESC''',
+            (campaign_id,)
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+
+    def get_conversation(self, conversation_id: int) -> Optional[Dict]:
+        """Get conversation by ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            'SELECT * FROM campaign_conversations WHERE id = ?',
+            (conversation_id,)
+        )
+
+        row = cursor.fetchone()
+        conn.close()
+
+        return dict(row) if row else None
+
+    def get_conversation_messages(self, conversation_id: int) -> List[Dict]:
+        """Get all messages in a conversation"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            '''SELECT * FROM campaign_messages
+            WHERE conversation_id = ?
+            ORDER BY sent_at ASC''',
+            (conversation_id,)
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+
+    def delete_conversation(self, conversation_id: int) -> bool:
+        """Delete conversation and all its messages"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            # Delete messages first
+            cursor.execute(
+                'DELETE FROM campaign_messages WHERE conversation_id = ?',
+                (conversation_id,)
+            )
+
+            # Delete conversation
+            cursor.execute(
+                'DELETE FROM campaign_conversations WHERE id = ?',
+                (conversation_id,)
+            )
+
+            conn.commit()
+            return True
+
+        except Exception as e:
+            print(f"Error deleting conversation: {e}")
+            return False
+        finally:
+            conn.close()
 
 
 # Singleton instance
