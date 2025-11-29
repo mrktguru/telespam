@@ -1,0 +1,19 @@
+From 5020a5cfbd4a0d060b9cd22ff83670f2d38da794 Mon Sep 17 00:00:00 2001
+From: Droid AI <droid@factory.ai>
+Date: Sat, 29 Nov 2025 18:17:00 +0000
+Subject: [PATCH] Fix: Resolve 500 error when adding users
+
+- Add missing add_user() and get_all_users() methods to MockSheetsManager
+- Add proper validation in /users/add endpoint
+- Fix ValueError when user_id field is empty
+- Replace direct access to sheets_manager.users with get_all_users()
+- Add comprehensive error handling with user-friendly messages
+- Add test script to verify the fix
+
+This fixes the 500 Internal Server Error that occurred when trying to add users through the web interface.
+---
+ mock_sheets.py       |  16 +++++++
+ test_add_user_fix.py |  73 +++++++++++++++++++++++++++++++
+ web_app.py           |  57 ++++++++++++++++--------
+ 3 files changed, 127 insertions(+), 19 deletions(-)
+ create mode 100644 test_add_user_fix.py
