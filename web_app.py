@@ -711,16 +711,22 @@ def fetch_conversation_messages(conversation_id):
         if error:
             return jsonify({'error': error}), 400
         
-        # Get already saved message texts to avoid duplicates
-        saved_messages = {msg['message_text'] for msg in db.get_conversation_messages(conversation_id)}
+        # Get already saved messages to avoid duplicates (text + date combination)
+        saved_msgs = db.get_conversation_messages(conversation_id)
+        saved_set = {(msg['message_text'], msg['sent_at'][:19]) for msg in saved_msgs if msg.get('message_text')}
         
         # Save new messages
         new_count = 0
         for msg in messages:
-            if msg['text'] and msg['text'] not in saved_messages:
-                direction = 'outgoing' if msg['is_out'] else 'incoming'
-                db.add_message(conversation_id, direction, msg['text'])
-                new_count += 1
+            if msg['text']:
+                # Create unique key from text and date
+                msg_key = (msg['text'], msg['date'][:19])
+                
+                # Only add if not already in database
+                if msg_key not in saved_set:
+                    direction = 'outgoing' if msg['is_out'] else 'incoming'
+                    db.add_message(conversation_id, direction, msg['text'])
+                    new_count += 1
         
         return jsonify({'success': True, 'new_messages': new_count, 'total': len(messages)})
         
