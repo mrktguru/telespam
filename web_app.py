@@ -689,7 +689,7 @@ def fetch_conversation_messages(conversation_id):
                 async for message in client.iter_messages(user_id, limit=100):
                     messages.append({
                         'text': message.text,
-                        'is_out': message.is_out,  # True if sent by us, False if received
+                        'is_out': message.out,  # True if sent by us, False if received
                         'date': message.date.isoformat()
                     })
                 
