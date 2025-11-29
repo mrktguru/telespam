@@ -125,7 +125,7 @@
                     </div>
 
                     <div class="d-grid gap-2">
-                        <button type="submit" class="btn btn-primary btn-lg">
+                        <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
                             <i class="bi bi-check-circle"></i> Update Profile
                         </button>
                         <a href="{{ url_for('accounts_list') }}" class="btn btn-outline-secondary">
@@ -133,6 +133,14 @@
                         </a>
                     </div>
                 </form>
+                
+                <!-- Loading Spinner -->
+                <div id="loadingSpinner" class="text-center mt-3" style="display: none;">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Updating profile via Telegram API...</p>
+                </div>
             </div>
         </div>
 
@@ -164,4 +172,41 @@
         box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
     }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.querySelector('form');
+    const submitBtn = document.getElementById('submitBtn');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    
+    form.addEventListener('submit', function(e) {
+        // Show loading state
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Updating...';
+        loadingSpinner.style.display = 'block';
+        
+        // Form will submit normally - we just show loading UI
+        console.log('Form submitting...');
+    });
+    
+    // Character counter for bio
+    const bioField = document.getElementById('bio');
+    if (bioField) {
+        const counterDiv = document.createElement('div');
+        counterDiv.className = 'small text-muted mt-1';
+        counterDiv.id = 'bioCounter';
+        bioField.parentElement.appendChild(counterDiv);
+        
+        bioField.addEventListener('input', function() {
+            const remaining = 70 - this.value.length;
+            counterDiv.textContent = `${this.value.length}/70 characters`;
+            if (remaining < 10) {
+                counterDiv.classList.add('text-warning');
+            } else {
+                counterDiv.classList.remove('text-warning');
+            }
+        });
+    }
+});
+</script>
 {% endblock %}
