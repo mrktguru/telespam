@@ -107,9 +107,12 @@ async def main_menu():
         print("  1b. Add account from session data (AUTH KEY + DC ID)")
         print("  2. Add users for outreach")
         print("  3. View system status")
+        print("  3a. Manage account profile (name, photo, bio)")
+        print("  3b. Manage proxies")
         print()
         print("🚀 OUTREACH:")
         print("  4. Start outreach campaign")
+        print("  4a. Manage rate limits (messages per day/hour)")
         print("  5. View outreach statistics")
         print("  6. Dry run (test without sending)")
         print()
@@ -142,8 +145,17 @@ async def main_menu():
             sheets_manager.print_summary()
             input("\nPress Enter to continue...")
 
+        elif choice == "3a" or choice.lower() == "3a":
+            run_script("account_manager.py")
+
+        elif choice == "3b" or choice.lower() == "3b":
+            run_script("proxy_manager.py")
+
         elif choice == "4":
             run_script("start_outreach_cli.py")
+
+        elif choice == "4a" or choice.lower() == "4a":
+            run_script("rate_limiter.py")
 
         elif choice == "5":
             run_script("start_outreach_cli.py", "--stats")
