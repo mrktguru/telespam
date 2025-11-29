@@ -61,13 +61,7 @@ class MockSheetsManager:
     # Accounts operations
 
     def add_account(self, account: Dict) -> bool:
-        """Add new account"""
-        # If campaign_id is provided, update account ID to include it
-        if account.get('campaign_id') and account.get('phone'):
-            # Format: acc_{phone}_{campaign_id}
-            phone_clean = account['phone'].replace('+', '').replace(' ', '')
-            account['id'] = f"acc_{phone_clean}_{account['campaign_id']}"
-        
+        """Add new account (always starts as 'free' account without campaign_id)"""
         self.accounts.append(account)
         self._save_to_file()
         print(f"✓ Account added: {account.get('id')} - {account.get('phone')}")
@@ -85,12 +79,18 @@ class MockSheetsManager:
         return self.accounts
 
     def update_account(self, account_id: str, updates: Dict) -> bool:
-        """Update account fields"""
+        """Update account fields (including ID if 'new_id' is in updates)"""
         for i, account in enumerate(self.accounts):
             if account.get('id') == account_id:
+                # Handle ID change if requested
+                if 'new_id' in updates:
+                    new_id = updates.pop('new_id')
+                    self.accounts[i]['id'] = new_id
+                    print(f"✓ Account ID changed: {account_id} → {new_id}")
+                
                 self.accounts[i].update(updates)
                 self._save_to_file()
-                print(f"✓ Account updated: {account_id} - {updates}")
+                print(f"✓ Account updated: {self.accounts[i].get('id')} - {updates}")
                 return True
         return False
 
