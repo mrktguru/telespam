@@ -206,6 +206,10 @@ class MockSheetsManager:
         if 'status' not in user_data:
             user_data['status'] = 'pending'
 
+        # Set campaign_id if not provided (null/None means no campaign assigned)
+        if 'campaign_id' not in user_data:
+            user_data['campaign_id'] = None
+
         self.users.append(user_data)
         self._save_to_file()
         print(f"✓ User added: {user_data.get('username') or user_data.get('user_id') or user_data.get('phone')}")
@@ -227,6 +231,22 @@ class MockSheetsManager:
                 self._save_to_file()
                 return True
         return False
+
+    def delete_users(self, user_ids: List) -> int:
+        """Delete multiple users by ID. Returns count of deleted users."""
+        deleted_count = 0
+        user_ids_set = set(str(uid) for uid in user_ids)
+        
+        # Filter out users with matching IDs
+        original_count = len(self.users)
+        self.users = [u for u in self.users if str(u.get('user_id')) not in user_ids_set]
+        deleted_count = original_count - len(self.users)
+        
+        if deleted_count > 0:
+            self._save_to_file()
+            print(f"✓ Deleted {deleted_count} user(s)")
+        
+        return deleted_count
 
     # Additional methods for testing
 

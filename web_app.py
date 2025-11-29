@@ -610,6 +610,72 @@ def edit_account(account_id):
     return render_template('edit_account.html', account=account)
 
 
+@app.route('/accounts/delete-photos/<account_id>', methods=['POST'])
+@login_required
+def delete_account_photos(account_id):
+    """Delete all profile photos from account"""
+    try:
+        account = sheets_manager.get_account(account_id)
+        
+        if not account:
+            return jsonify({'success': False, 'error': 'Account not found'})
+        
+        # Import required modules
+        import asyncio
+        from pathlib import Path
+        from telethon import TelegramClient
+        from account_manager import delete_all_profile_photos
+        
+        # Get session file
+        phone = account.get('phone', '')
+        session_file = Path(__file__).parent / 'sessions' / f'{phone.replace("+", "")}.session'
+        
+        if not session_file.exists():
+            return jsonify({'success': False, 'error': 'Session file not found'})
+        
+        # Delete photos via Telegram API
+        async def delete_photos():
+            client = TelegramClient(
+                str(session_file.with_suffix('')),
+                config.API_ID,
+                config.API_HASH
+            )
+            
+            try:
+                await client.connect()
+                
+                if not await client.is_user_authorized():
+                    return False, 'Account not authorized'
+                
+                result = await delete_all_profile_photos(client)
+                
+                return True, result
+            
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return False, str(e)
+            
+            finally:
+                try:
+                    await client.disconnect()
+                except:
+                    pass
+        
+        # Run deletion
+        success, result = asyncio.run(delete_photos())
+        
+        if success:
+            return jsonify({'success': True, 'message': 'All photos deleted'})
+        else:
+            return jsonify({'success': False, 'error': result})
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
+
 # ============================================================================
 # USER ROUTES (for outreach)
 # ============================================================================
