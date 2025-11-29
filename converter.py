@@ -103,9 +103,19 @@ async def process_tdata(zip_path: str, notes: str = "") -> Dict:
         }
 
     except Exception as e:
+        error_msg = str(e)
+
+        # Better error messages
+        if "TDesktopUnauthorized" in error_msg or "unauthorized" in error_msg.lower():
+            error_msg = "TDATA account is not authorized. The account was never logged in or session expired. Use an authorized Telegram Desktop tdata."
+        elif "LoginFlagInvalid" in error_msg:
+            error_msg = "Invalid login flag. This is a code issue, please report."
+        elif "tdata folder not found" in error_msg:
+            error_msg = "No tdata folder found in the archive. Make sure you're uploading the correct Telegram Desktop data."
+
         return {
             "success": False,
-            "error": str(e),
+            "error": error_msg,
             "error_code": config.ErrorCode.CONVERSION_FAILED
         }
 
