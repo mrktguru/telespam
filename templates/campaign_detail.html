@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}{{ campaign.name }} - Campaign{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 fw-bold">{{ campaign.name }}</h1>
+        <p class="text-muted mb-0">Created: {{ campaign.created_at[:19] }}</p>
+    </div>
+    <div>
+        {% if campaign.status == 'pending' %}
+        <button class="btn btn-primary" onclick="startCampaign()">
+            <i class="bi bi-play-fill"></i> Start Campaign
+        </button>
+        {% endif %}
+        <a href="{{ url_for('campaigns') }}" class="btn btn-outline-secondary">Back to Campaigns</a>
+    </div>
+</div>
+
+<!-- Progress Card -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row align-items-center">
+            <div class="col-md-8">
+                <h5 class="card-title">Progress</h5>
+                <div class="progress mb-3" style="height: 30px;">
+                    <div id="progressBar" class="progress-bar" role="progressbar"
+                         style="width: {{ ((campaign.sent_count / campaign.total_users * 100) | int) if campaign.total_users > 0 else 0 }}%">
+                        <span id="progressText">{{ ((campaign.sent_count / campaign.total_users * 100) | int) if campaign.total_users > 0 else 0 }}%</span>
+                    </div>
+                </div>
+                <div class="row text-center">
+                    <div class="col">
+                        <h4 id="sentCount">{{ campaign.sent_count }}</h4>
+                        <small class="text-muted">Sent</small>
+                    </div>
+                    <div class="col">
+                        <h4 id="failedCount">{{ campaign.failed_count }}</h4>
+                        <small class="text-muted">Failed</small>
+                    </div>
+                    <div class="col">
+                        <h4>{{ campaign.total_users }}</h4>
+                        <small class="text-muted">Total</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="text-center">
+                    <h5>Status</h5>
+                    <h2 id="statusBadge">
+                        {% if campaign.status == 'running' %}
+                            <span class="badge bg-primary">Running</span>
+                        {% elif campaign.status == 'completed' %}
+                            <span class="badge bg-success">Completed</span>
+                        {% elif campaign.status == 'failed' %}
+                            <span class="badge bg-danger">Failed</span>
+                        {% else %}
+                            <span class="badge bg-secondary">{{ campaign.status }}</span>
+                        {% endif %}
+                    </h2>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Campaign Settings -->
+<div class="card mb-4">
+    <div class="card-header bg-white">
+        <h5 class="card-title mb-0">Settings</h5>
+    </div>
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-sm-3">Message:</dt>
+            <dd class="col-sm-9">
+                <pre class="bg-light p-3 rounded">{{ campaign.settings.message if campaign.settings else 'N/A' }}</pre>
+            </dd>
+
+            <dt class="col-sm-3">Accounts:</dt>
+            <dd class="col-sm-9">
+                {{ campaign.settings.accounts | length if campaign.settings and campaign.settings.accounts else 0 }} selected
+            </dd>
+
+            <dt class="col-sm-3">Target Users:</dt>
+            <dd class="col-sm-9">
+                {{ campaign.settings.users | length if campaign.settings and campaign.settings.users else 0 }} users
+            </dd>
+        </dl>
+    </div>
+</div>
+
+<!-- Logs -->
+<div class="card">
+    <div class="card-header bg-white">
+        <h5 class="card-title mb-0">Activity Log</h5>
+    </div>
+    <div class="card-body" style="max-height: 400px; overflow-y: auto;" id="logsContainer">
+        {% if logs %}
+        <div class="list-group list-group-flush">
+            {% for log in logs %}
+            <div class="list-group-item px-0">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="badge bg-{{ 'info' if log.level == 'info' else 'warning' if log.level == 'warning' else 'danger' }}">
+                            {{ log.level }}
+                        </span>
+                        <span class="ms-2">{{ log.message }}</span>
+                    </div>
+                    <small class="text-muted">{{ log.timestamp[:19] }}</small>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted text-center mb-0">No logs yet</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let pollingInterval;
+
+function startCampaign() {
+    fetch("{{ url_for('start_campaign', campaign_id=campaign.id) }}", {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        }
+    });
+}
+
+function updateProgress() {
+    fetch("{{ url_for('campaign_progress', campaign_id=campaign.id) }}")
+    .then(response => response.json())
+    .then(data => {
+        // Update progress bar
+        document.getElementById('progressBar').style.width = data.percent + '%';
+        document.getElementById('progressText').textContent = data.percent + '%';
+
+        // Update counts
+        document.getElementById('sentCount').textContent = data.sent;
+        document.getElementById('failedCount').textContent = data.failed;
+
+        // Update status
+        let statusBadge = document.getElementById('statusBadge');
+        let badgeClass = 'bg-secondary';
+
+        if (data.status === 'running') {
+            badgeClass = 'bg-primary';
+        } else if (data.status === 'completed') {
+            badgeClass = 'bg-success';
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+        } else if (data.status === 'failed') {
+            badgeClass = 'bg-danger';
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+        }
+
+        statusBadge.innerHTML = `<span class="badge ${badgeClass}">${data.status}</span>`;
+    });
+}
+
+// Start polling if campaign is running
+{% if campaign.status == 'running' %}
+pollingInterval = setInterval(updateProgress, 2000); // Update every 2 seconds
+{% endif %}
+</script>
+{% endblock %}
