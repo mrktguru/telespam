@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 from typing import Dict, Optional
-from opentele.tl import TelegramClient
+from opentele.td import TDesktop
 from opentele.api import API
 import config
 
@@ -54,10 +54,10 @@ async def process_tdata(zip_path: str, notes: str = "") -> Dict:
             raise ValueError("tdata folder not found in archive")
 
         # 3. Convert via opentele
-        client = TelegramClient(str(tdata_path))
+        tdesk = TDesktop(str(tdata_path))
         session_path = config.SESSIONS_DIR / f"{uuid4()}"
 
-        telethon_client = await client.ToTelethon(
+        telethon_client = await tdesk.ToTelethon(
             session=str(session_path),
             flag=API.TelegramDesktop
         )
