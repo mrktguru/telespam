@@ -110,7 +110,7 @@ def dashboard():
     accounts = sheets_manager.get_all_accounts()
 
     # Get users for outreach
-    users = sheets_manager.users
+    users = sheets_manager.get_all_users()
 
     # Get recent campaigns
     campaigns = db.get_user_campaigns(user_id, limit=10)
@@ -176,7 +176,7 @@ def new_campaign():
 
     # Get accounts and users for form
     accounts = sheets_manager.get_all_accounts()
-    users = sheets_manager.users
+    users = sheets_manager.get_all_users()
 
     return render_template('new_campaign.html', accounts=accounts, users=users)
 
@@ -261,7 +261,7 @@ def accounts_list():
 @login_required
 def users_list():
     """List all users for outreach"""
-    users = sheets_manager.users
+    users = sheets_manager.get_all_users()
 
     return render_template('users.html', users=users)
 
@@ -270,23 +270,42 @@ def users_list():
 @login_required
 def add_user():
     """Add user for outreach"""
-    username = request.form.get('username')
-    user_id = request.form.get('user_id')
-    phone = request.form.get('phone')
-    priority = int(request.form.get('priority', 1))
+    try:
+        username = request.form.get('username', '').strip()
+        user_id = request.form.get('user_id', '').strip()
+        phone = request.form.get('phone', '').strip()
+        priority = int(request.form.get('priority', 1))
 
-    user_data = {
-        'username': username,
-        'user_id': int(user_id) if user_id else None,
-        'phone': phone,
-        'priority': priority,
-        'status': 'pending'
-    }
+        # Validate: at least username or user_id must be provided
+        if not username and not user_id:
+            flash('Please provide at least Username or User ID', 'danger')
+            return redirect(url_for('users_list'))
 
-    sheets_manager.add_user(user_data)
+        # Convert user_id to int if provided
+        user_id_int = None
+        if user_id:
+            try:
+                user_id_int = int(user_id)
+            except ValueError:
+                flash('User ID must be a valid number', 'danger')
+                return redirect(url_for('users_list'))
 
-    flash('User added successfully', 'success')
-    return redirect(url_for('users_list'))
+        user_data = {
+            'username': username if username else None,
+            'user_id': user_id_int,
+            'phone': phone if phone else None,
+            'priority': priority,
+            'status': 'pending'
+        }
+
+        sheets_manager.add_user(user_data)
+
+        flash('User added successfully', 'success')
+        return redirect(url_for('users_list'))
+        
+    except Exception as e:
+        flash(f'Error adding user: {str(e)}', 'danger')
+        return redirect(url_for('users_list'))
 
 
 # ============================================================================
@@ -351,7 +370,7 @@ def add_proxy():
 def api_stats():
     """Get system stats (JSON)"""
     accounts = sheets_manager.get_all_accounts()
-    users = sheets_manager.users
+    users = sheets_manager.get_all_users()
     user_id = session['user_id']
     campaigns = db.get_user_campaigns(user_id)
 

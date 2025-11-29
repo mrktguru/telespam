@@ -179,6 +179,22 @@ class MockSheetsManager:
 
     # Users operations
 
+    def add_user(self, user: Dict) -> bool:
+        """Add new user for outreach"""
+        # Add timestamp
+        user['added_at'] = datetime.now().isoformat()
+        user['contacted_at'] = None
+        user['assigned_account'] = None
+        
+        self.users.append(user)
+        self._save_to_file()
+        print(f"✓ User added: {user.get('username') or user.get('user_id')} - priority={user.get('priority')}")
+        return True
+
+    def get_all_users(self) -> List[Dict]:
+        """Get all users"""
+        return self.users
+
     def get_pending_users(self, limit: int = 10) -> List[Dict]:
         """Get users with status 'pending'"""
         pending = [u for u in self.users if u.get('status') == 'pending']
