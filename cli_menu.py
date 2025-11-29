@@ -138,6 +138,9 @@ async def main_menu():
         elif choice == "1b" or choice.lower() == "1b":
             run_script("add_account_from_session_data.py")
 
+        elif choice == "1c" or choice.lower() == "1c":
+            run_script("delete_account_cli.py")
+
         elif choice == "2":
             run_script("add_users_cli.py")
 
