@@ -484,6 +484,23 @@ def accounts_list():
     return render_template('accounts.html', accounts=accounts)
 
 
+@app.route('/accounts/delete/<account_id>', methods=['POST'])
+@login_required
+def delete_account(account_id):
+    """Delete account"""
+    try:
+        success = sheets_manager.delete_account(account_id)
+        
+        if success:
+            flash(f'Account {account_id} deleted successfully', 'success')
+        else:
+            flash(f'Account {account_id} not found', 'warning')
+    except Exception as e:
+        flash(f'Error deleting account: {str(e)}', 'danger')
+    
+    return redirect(url_for('accounts_list'))
+
+
 # ============================================================================
 # USER ROUTES (for outreach)
 # ============================================================================

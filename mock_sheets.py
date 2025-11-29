@@ -88,6 +88,18 @@ class MockSheetsManager:
                 return True
         return False
 
+    def delete_account(self, account_id: str) -> bool:
+        """Delete account by ID"""
+        for i, account in enumerate(self.accounts):
+            if account.get('id') == account_id:
+                phone = account.get('phone', 'N/A')
+                self.accounts.pop(i)
+                self._save_to_file()
+                print(f"✓ Account deleted: {account_id} - {phone}")
+                return True
+        print(f"✗ Account not found: {account_id}")
+        return False
+
     def get_available_accounts(self, limit: int = 10) -> List[Dict]:
         """Get accounts available for sending"""
         import config
