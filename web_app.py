@@ -501,6 +501,110 @@ def delete_account(account_id):
     return redirect(url_for('accounts_list'))
 
 
+@app.route('/accounts/edit/<account_id>', methods=['GET', 'POST'])
+@login_required
+def edit_account(account_id):
+    """Edit account profile"""
+    account = sheets_manager.get_account(account_id)
+    
+    if not account:
+        flash('Account not found', 'danger')
+        return redirect(url_for('accounts_list'))
+    
+    if request.method == 'POST':
+        try:
+            # Import account manager functions
+            import asyncio
+            from pathlib import Path
+            from telethon import TelegramClient
+            from account_manager import update_full_profile, get_account_info
+            
+            # Get form data
+            first_name = request.form.get('first_name', '').strip()
+            last_name = request.form.get('last_name', '').strip()
+            bio = request.form.get('bio', '').strip()
+            
+            # Handle file uploads
+            photos = request.files.getlist('photos')
+            photo_paths = []
+            
+            if photos:
+                upload_dir = Path(__file__).parent / 'uploads' / 'profile_photos'
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                
+                for photo in photos:
+                    if photo and photo.filename:
+                        filename = f"{account_id}_{photo.filename}"
+                        filepath = upload_dir / filename
+                        photo.save(str(filepath))
+                        photo_paths.append(str(filepath))
+            
+            # Get session file
+            phone = account.get('phone', '')
+            session_file = Path(__file__).parent / 'sessions' / f'{phone.replace("+", "")}.session'
+            
+            if not session_file.exists():
+                flash('Session file not found', 'danger')
+                return redirect(url_for('accounts_list'))
+            
+            # Update profile via Telegram API
+            async def update_profile():
+                client = TelegramClient(
+                    str(session_file.with_suffix('')),
+                    config.API_ID,
+                    config.API_HASH
+                )
+                
+                await client.connect()
+                
+                if not await client.is_user_authorized():
+                    await client.disconnect()
+                    return False, 'Account not authorized'
+                
+                try:
+                    await update_full_profile(
+                        client,
+                        first_name=first_name or None,
+                        last_name=last_name or None,
+                        bio=bio or None,
+                        photo_paths=photo_paths if photo_paths else None
+                    )
+                    
+                    # Get updated info
+                    info = await get_account_info(client)
+                    await client.disconnect()
+                    
+                    return True, info
+                
+                except Exception as e:
+                    await client.disconnect()
+                    return False, str(e)
+            
+            # Run update
+            success, result = asyncio.run(update_profile())
+            
+            if success:
+                # Update local storage
+                sheets_manager.update_account(account_id, {
+                    'first_name': result['first_name'],
+                    'last_name': result['last_name']
+                })
+                
+                flash('Profile updated successfully!', 'success')
+            else:
+                flash(f'Error updating profile: {result}', 'danger')
+        
+        except Exception as e:
+            flash(f'Error: {str(e)}', 'danger')
+            import traceback
+            traceback.print_exc()
+        
+        return redirect(url_for('accounts_list'))
+    
+    # GET request - show form
+    return render_template('edit_account.html', account=account)
+
+
 # ============================================================================
 # USER ROUTES (for outreach)
 # ============================================================================
