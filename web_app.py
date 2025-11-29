@@ -400,6 +400,23 @@ def new_campaign():
             settings=settings
         )
 
+        # Assign campaign_id to selected accounts and update their IDs
+        for account_id in account_ids:
+            account = sheets_manager.get_account(account_id)
+            if account:
+                phone = account.get('phone', '')
+                if phone:
+                    # Generate new ID: acc_{phone}_{campaign_id}
+                    phone_clean = phone.replace('+', '').replace(' ', '')
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    
+                    # Update account with new ID and campaign_id
+                    sheets_manager.update_account(account_id, {
+                        'new_id': new_account_id,
+                        'campaign_id': campaign_id
+                    })
+                    print(f"✓ Assigned campaign {campaign_id} to account {account_id} → {new_account_id}")
+
         flash('Campaign created! Starting...', 'success')
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
 
