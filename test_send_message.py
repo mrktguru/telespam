@@ -52,10 +52,14 @@ async def send_test_message():
         print("Please run create_session.py first to create a session")
         sys.exit(1)
 
+    # Import phone utils
+    from phone_utils import filename_to_phone
+
     # Select session
     print("Available sessions:")
     for i, session_file in enumerate(session_files, 1):
-        print(f"{i}. {session_file.stem}")
+        phone_display = filename_to_phone(session_file.stem)
+        print(f"{i}. {phone_display}")
 
     print()
     if len(session_files) == 1:
