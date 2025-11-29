@@ -16,18 +16,17 @@ os.environ['USE_MOCK_STORAGE'] = 'true'
 from mock_sheets import sheets_manager
 
 
-def create_session_file(session_path: str, auth_key: bytes, dc_id: int,
-                        server_address: str = None, port: int = None):
+async def create_session_file(session_path: str, auth_key: bytes, dc_id: int):
     """
-    Create Telethon session file manually
+    Create Telethon session file with proper structure
 
     Args:
-        session_path: Path to .session file
+        session_path: Path to .session file (without .session extension)
         auth_key: Authorization key (bytes)
         dc_id: Data center ID (1-5)
-        server_address: Optional server address
-        port: Optional port
     """
+    from telethon import TelegramClient
+    from telethon.sessions import SQLiteSession
 
     # Default DC addresses
     dc_addresses = {
@@ -38,69 +37,32 @@ def create_session_file(session_path: str, auth_key: bytes, dc_id: int,
         5: ('91.108.56.130', 443),
     }
 
-    if not server_address or not port:
-        if dc_id in dc_addresses:
-            server_address, port = dc_addresses[dc_id]
-        else:
-            raise ValueError(f"Unknown DC ID: {dc_id}")
+    if dc_id not in dc_addresses:
+        raise ValueError(f"Unknown DC ID: {dc_id}")
 
-    # Create SQLite database
-    conn = sqlite3.connect(session_path)
+    server_address, port = dc_addresses[dc_id]
+
+    # Create a temporary client to initialize the session structure
+    # Use dummy API credentials since we'll replace the auth_key anyway
+    temp_client = TelegramClient(session_path, api_id=1, api_hash='x' * 32)
+
+    # Don't connect, just create the session file structure
+    # This will create the proper SQLite structure
+    session = temp_client.session
+
+    # Now manually update the session with our auth_key
+    session_file = f"{session_path}.session"
+
+    # Connect to the SQLite database
+    conn = sqlite3.connect(session_file)
     cursor = conn.cursor()
 
-    # Create tables (Telethon session structure)
+    # Update sessions table with our auth_key and dc_id
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sessions (
-            dc_id INTEGER PRIMARY KEY,
-            server_address TEXT,
-            port INTEGER,
-            auth_key BLOB,
-            takeout_id INTEGER
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS entities (
-            id INTEGER PRIMARY KEY,
-            hash INTEGER NOT NULL,
-            username TEXT,
-            phone TEXT,
-            name TEXT
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS version (
-            version INTEGER PRIMARY KEY
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sent_files (
-            md5_digest BLOB,
-            file_size INTEGER,
-            type INTEGER,
-            id INTEGER,
-            hash INTEGER,
-            PRIMARY KEY(md5_digest, file_size, type)
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS update_state (
-            id INTEGER PRIMARY KEY,
-            pts INTEGER,
-            qts INTEGER,
-            date INTEGER,
-            seq INTEGER
-        )
-    ''')
-
-    # Insert data (with takeout_id = NULL)
-    cursor.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?, ?, ?, ?)',
-                   (dc_id, server_address, port, auth_key, None))
-
-    cursor.execute('INSERT OR REPLACE INTO version VALUES (?)', (9,))
+        INSERT OR REPLACE INTO sessions
+        (dc_id, server_address, port, auth_key, takeout_id)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (dc_id, server_address, port, auth_key, None))
 
     conn.commit()
     conn.close()
@@ -204,7 +166,7 @@ async def add_account_from_session_data():
 
     try:
         # Create session file
-        create_session_file(str(session_file), auth_key, dc_id)
+        await create_session_file(str(session_file.with_suffix('')), auth_key, dc_id)
         print(f"✓ Session file created: {session_file}")
 
         # Test connection
