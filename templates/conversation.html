@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Conversation - {{ conversation.recipient_username or conversation.recipient_user_id }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 fw-bold">
+            <i class="bi bi-chat-dots"></i> Conversation with 
+            {% if conversation.recipient_username %}
+                @{{ conversation.recipient_username }}
+            {% else %}
+                ID: {{ conversation.recipient_user_id }}
+            {% endif %}
+        </h1>
+        <p class="text-muted mb-0">
+            Campaign: <a href="{{ url_for('campaign_detail', campaign_id=campaign.id) }}">{{ campaign.name }}</a>
+        </p>
+    </div>
+    <div>
+        <a href="{{ url_for('campaign_detail', campaign_id=campaign.id) }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Campaign
+        </a>
+    </div>
+</div>
+
+<!-- Conversation Info Card -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6">
+                <h6 class="text-muted">Sender Account</h6>
+                <p><strong>{{ conversation.sender_account_id }}</strong></p>
+            </div>
+            <div class="col-md-3">
+                <h6 class="text-muted">IP Address</h6>
+                <p><code>{{ conversation.ip_address }}</code></p>
+            </div>
+            <div class="col-md-3">
+                <h6 class="text-muted">Started</h6>
+                <p>{{ conversation.created_at[:19] if conversation.created_at else 'N/A' }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Messages Card -->
+<div class="card mb-4">
+    <div class="card-header bg-white">
+        <h5 class="card-title mb-0">Messages ({{ messages | length }})</h5>
+    </div>
+    <div class="card-body" style="max-height: 500px; overflow-y: auto;">
+        {% if messages %}
+            {% for message in messages %}
+            <div class="mb-3 {% if message.direction == 'outgoing' %}text-end{% endif %}">
+                <div class="d-inline-block" style="max-width: 70%;">
+                    <div class="p-3 rounded {% if message.direction == 'outgoing' %}bg-primary text-white{% else %}bg-light{% endif %}">
+                        {{ message.message_text }}
+                    </div>
+                    <small class="text-muted d-block mt-1">
+                        {% if message.direction == 'outgoing' %}
+                            <i class="bi bi-arrow-right-circle"></i> Sent
+                        {% else %}
+                            <i class="bi bi-arrow-left-circle"></i> Received
+                        {% endif %}
+                        • {{ message.sent_at[:19] }}
+                    </small>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="text-center py-5">
+                <i class="bi bi-chat-text" style="font-size: 3rem; color: #dee2e6;"></i>
+                <p class="text-muted mt-2">No messages yet</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Send Message Card -->
+<div class="card">
+    <div class="card-header bg-white">
+        <h5 class="card-title mb-0">Send New Message</h5>
+    </div>
+    <div class="card-body">
+        <form action="{{ url_for('send_conversation_message', conversation_id=conversation.id) }}" method="POST">
+            <div class="mb-3">
+                <label for="message" class="form-label">Message</label>
+                <textarea class="form-control" id="message" name="message" rows="4" required 
+                          placeholder="Type your message here..."></textarea>
+            </div>
+            <div class="d-flex justify-content-between align-items-center">
+                <small class="text-muted">
+                    <i class="bi bi-info-circle"></i> This will be sent from account: <strong>{{ conversation.sender_account_id }}</strong>
+                </small>
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-send"></i> Send Message
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Auto-scroll to bottom of messages
+window.addEventListener('load', function() {
+    const messagesContainer = document.querySelector('.card-body[style*="overflow-y"]');
+    if (messagesContainer) {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+});
+</script>
+{% endblock %}

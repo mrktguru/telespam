@@ -65,28 +65,66 @@
     </div>
 </div>
 
-<!-- Campaign Settings -->
+<!-- Campaign Conversations -->
 <div class="card mb-4">
     <div class="card-header bg-white">
-        <h5 class="card-title mb-0">Settings</h5>
+        <h5 class="card-title mb-0">Conversations ({{ conversations | length }})</h5>
     </div>
-    <div class="card-body">
-        <dl class="row mb-0">
-            <dt class="col-sm-3">Message:</dt>
-            <dd class="col-sm-9">
-                <pre class="bg-light p-3 rounded">{{ campaign.settings.message if campaign.settings else 'N/A' }}</pre>
-            </dd>
-
-            <dt class="col-sm-3">Accounts:</dt>
-            <dd class="col-sm-9">
-                {{ campaign.settings.accounts | length if campaign.settings and campaign.settings.accounts else 0 }} selected
-            </dd>
-
-            <dt class="col-sm-3">Target Users:</dt>
-            <dd class="col-sm-9">
-                {{ campaign.settings.users | length if campaign.settings and campaign.settings.users else 0 }} users
-            </dd>
-        </dl>
+    <div class="card-body p-0">
+        {% if conversations %}
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>IP</th>
+                        <th>Sender Account</th>
+                        <th>Recipient</th>
+                        <th>Last Message</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for conversation in conversations %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>
+                            <code>{{ conversation.ip_address }}</code>
+                        </td>
+                        <td>
+                            <strong>{{ conversation.sender_account_id }}</strong>
+                        </td>
+                        <td>
+                            {% if conversation.recipient_username %}
+                                @{{ conversation.recipient_username }}
+                            {% else %}
+                                ID: {{ conversation.recipient_user_id }}
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('view_conversation', conversation_id=conversation.id) }}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-chat-dots"></i> View Chat
+                            </a>
+                            <small class="text-muted d-block">{{ conversation.last_message_at[:19] if conversation.last_message_at else 'N/A' }}</small>
+                        </td>
+                        <td>
+                            <form action="{{ url_for('delete_conversation', conversation_id=conversation.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Delete this conversation?');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-trash"></i> Delete
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4">
+            <i class="bi bi-chat-square-text" style="font-size: 3rem; color: #dee2e6;"></i>
+            <p class="text-muted mt-2">No conversations yet</p>
+        </div>
+        {% endif %}
     </div>
 </div>
 
