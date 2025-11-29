@@ -122,9 +122,21 @@ async def send_message_to_user(account, user, message_text):
 
 def run_campaign_task(campaign_id):
     """Run campaign in background thread"""
+    import traceback
+    
     try:
+        # Validate API credentials first
+        if not config.API_ID or not config.API_HASH:
+            error_msg = 'CRITICAL: API_ID or API_HASH not configured! Check .env file.'
+            db.add_campaign_log(campaign_id, error_msg, level='error')
+            db.update_campaign(campaign_id, status='failed')
+            return
+        
+        db.add_campaign_log(campaign_id, f'API_ID configured: {config.API_ID}', level='info')
+        
         campaign = db.get_campaign(campaign_id)
         if not campaign:
+            db.add_campaign_log(campaign_id, 'Campaign not found in database', level='error')
             return
 
         settings = campaign.get('settings', {})
@@ -250,7 +262,10 @@ def run_campaign_task(campaign_id):
         db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
 
     except Exception as e:
-        db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
+        # Log full traceback for debugging
+        tb = traceback.format_exc()
+        db.add_campaign_log(campaign_id, f'Campaign CRITICAL error: {str(e)}', level='error')
+        db.add_campaign_log(campaign_id, f'Traceback: {tb}', level='error')
         db.update_campaign(campaign_id, status='failed')
 
 

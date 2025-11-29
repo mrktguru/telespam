@@ -6,7 +6,13 @@ from pathlib import Path
 # Load environment variables (optional)
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    env_file = Path(__file__).parent / '.env'
+    if env_file.exists():
+        load_dotenv(env_file)
+        print(f"✓ Loaded .env file from: {env_file}")
+    else:
+        print(f"⚠ No .env file found at: {env_file}")
+        print(f"  Using environment variables only")
 except ImportError:
     print("Warning: python-dotenv not installed, using environment variables only")
 
@@ -16,6 +22,15 @@ BASE_DIR = Path(__file__).parent
 # Telegram API settings
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
+
+# Debug: Print API credentials status on load
+if API_ID and API_HASH:
+    print(f"✓ API_ID loaded: {API_ID}")
+    print(f"✓ API_HASH loaded: {API_HASH[:10]}..." if len(API_HASH) > 10 else "✓ API_HASH loaded")
+else:
+    print("✗ ERROR: API_ID or API_HASH not found!")
+    print(f"  API_ID: {API_ID}")
+    print(f"  API_HASH: {API_HASH}")
 
 # n8n webhooks
 N8N_WEBHOOK_INCOMING = os.getenv("N8N_WEBHOOK_INCOMING")
