@@ -48,13 +48,14 @@ def create_session_file(session_path: str, auth_key: bytes, dc_id: int,
     conn = sqlite3.connect(session_path)
     cursor = conn.cursor()
 
-    # Create tables
+    # Create tables (Telethon session structure)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sessions (
             dc_id INTEGER PRIMARY KEY,
             server_address TEXT,
             port INTEGER,
-            auth_key BLOB
+            auth_key BLOB,
+            takeout_id INTEGER
         )
     ''')
 
@@ -74,11 +75,32 @@ def create_session_file(session_path: str, auth_key: bytes, dc_id: int,
         )
     ''')
 
-    # Insert data
-    cursor.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?, ?, ?)',
-                   (dc_id, server_address, port, auth_key))
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sent_files (
+            md5_digest BLOB,
+            file_size INTEGER,
+            type INTEGER,
+            id INTEGER,
+            hash INTEGER,
+            PRIMARY KEY(md5_digest, file_size, type)
+        )
+    ''')
 
-    cursor.execute('INSERT OR REPLACE INTO version VALUES (?)', (7,))
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS update_state (
+            id INTEGER PRIMARY KEY,
+            pts INTEGER,
+            qts INTEGER,
+            date INTEGER,
+            seq INTEGER
+        )
+    ''')
+
+    # Insert data (with takeout_id = NULL)
+    cursor.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?, ?, ?, ?)',
+                   (dc_id, server_address, port, auth_key, None))
+
+    cursor.execute('INSERT OR REPLACE INTO version VALUES (?)', (9,))
 
     conn.commit()
     conn.close()
