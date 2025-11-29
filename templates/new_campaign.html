@@ -38,10 +38,17 @@
             <div class="card mb-4">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">Select Users</h5>
-                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllUsers()">
-                        Select All
-                    </button>
+                    <div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="document.getElementById('csvUpload').click()">
+                            <i class="bi bi-upload"></i> CSV/XLS
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllUsers()">
+                            Select All
+                        </button>
+                    </div>
                 </div>
+                <input type="file" id="csvUpload" accept=".csv,.xlsx,.xls" style="display: none;" onchange="handleCSVUpload(event)">
+                <div id="importStatus" class="alert alert-info m-3" style="display: none;"></div>
                 <div class="card-body" style="max-height: 400px; overflow-y: auto;">
                     {% if users %}
                         {% for user in users %}
@@ -164,5 +171,41 @@ document.querySelectorAll('.account-checkbox, .user-checkbox').forEach(cb => {
 });
 
 updateCounts();
+
+// CSV Import
+function handleCSVUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const status = document.getElementById('importStatus');
+    status.style.display = 'block';
+    status.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing...';
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    fetch('/users/import-csv', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            status.classList.remove('alert-info');
+            status.classList.add('alert-success');
+            status.innerHTML = `<i class="bi bi-check-circle"></i> Imported ${data.count} users! Reloading...`;
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            status.classList.remove('alert-info');
+            status.classList.add('alert-danger');
+            status.innerHTML = `<i class="bi bi-x-circle"></i> Error: ${data.error}`;
+        }
+    })
+    .catch(error => {
+        status.classList.remove('alert-info');
+        status.classList.add('alert-danger');
+        status.innerHTML = `<i class="bi bi-x-circle"></i> Error: ${error}`;
+    });
+}
 </script>
 {% endblock %}

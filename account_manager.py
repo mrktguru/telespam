@@ -48,13 +48,57 @@ async def update_account_bio(client: TelegramClient, bio: str):
     return result
 
 
-async def update_account_photo(client: TelegramClient, photo_path: str):
+async def get_profile_photos(client: TelegramClient):
+    """
+    Get all profile photos
+
+    Args:
+        client: Connected TelegramClient
+
+    Returns:
+        List of profile photo objects
+    """
+    photos = await client.get_profile_photos('me')
+    return photos
+
+
+async def delete_all_profile_photos(client: TelegramClient):
+    """
+    Delete all profile photos
+
+    Args:
+        client: Connected TelegramClient
+
+    Returns:
+        Result of delete operation
+    """
+    photos = await client.get_profile_photos('me')
+    
+    if not photos:
+        print("No photos to delete")
+        return None
+    
+    # Extract photo IDs
+    from telethon.tl.types import InputPhoto
+    photo_ids = [InputPhoto(
+        id=photo.id,
+        access_hash=photo.access_hash,
+        file_reference=photo.file_reference
+    ) for photo in photos]
+    
+    result = await client(DeletePhotosRequest(id=photo_ids))
+    print(f"Deleted {len(photo_ids)} profile photo(s)")
+    return result
+
+
+async def update_account_photo(client: TelegramClient, photo_path: str, replace_all: bool = False):
     """
     Update account profile photo
 
     Args:
         client: Connected TelegramClient
         photo_path: Path to photo file
+        replace_all: If True, delete all existing photos before uploading
 
     Returns:
         Updated photo object
@@ -63,6 +107,11 @@ async def update_account_photo(client: TelegramClient, photo_path: str):
 
     if not photo_file.exists():
         raise FileNotFoundError(f"Photo not found: {photo_path}")
+
+    # Delete existing photos if requested
+    if replace_all:
+        await delete_all_profile_photos(client)
+        await asyncio.sleep(1)
 
     # Upload photo
     file = await client.upload_file(photo_file)
@@ -95,13 +144,14 @@ async def delete_account_photos(client: TelegramClient, photo_ids: Optional[List
     return None
 
 
-async def upload_multiple_photos(client: TelegramClient, photo_paths: List[str]):
+async def upload_multiple_photos(client: TelegramClient, photo_paths: List[str], replace_existing: bool = True):
     """
     Upload multiple photos to account (carousel)
 
     Args:
         client: Connected TelegramClient
         photo_paths: List of paths to photo files
+        replace_existing: If True, first photo replaces all existing photos
 
     Returns:
         List of uploaded photo objects

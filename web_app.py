@@ -628,6 +628,72 @@ def edit_account(account_id):
     return render_template('edit_account.html', account=account)
 
 
+@app.route('/accounts/delete-photos/<account_id>', methods=['POST'])
+@login_required
+def delete_account_photos(account_id):
+    """Delete all profile photos from account"""
+    try:
+        account = sheets_manager.get_account(account_id)
+        
+        if not account:
+            return jsonify({'success': False, 'error': 'Account not found'})
+        
+        # Import required modules
+        import asyncio
+        from pathlib import Path
+        from telethon import TelegramClient
+        from account_manager import delete_all_profile_photos
+        
+        # Get session file
+        phone = account.get('phone', '')
+        session_file = Path(__file__).parent / 'sessions' / f'{phone.replace("+", "")}.session'
+        
+        if not session_file.exists():
+            return jsonify({'success': False, 'error': 'Session file not found'})
+        
+        # Delete photos via Telegram API
+        async def delete_photos():
+            client = TelegramClient(
+                str(session_file.with_suffix('')),
+                config.API_ID,
+                config.API_HASH
+            )
+            
+            try:
+                await client.connect()
+                
+                if not await client.is_user_authorized():
+                    return False, 'Account not authorized'
+                
+                result = await delete_all_profile_photos(client)
+                
+                return True, result
+            
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return False, str(e)
+            
+            finally:
+                try:
+                    await client.disconnect()
+                except:
+                    pass
+        
+        # Run deletion
+        success, result = asyncio.run(delete_photos())
+        
+        if success:
+            return jsonify({'success': True, 'message': 'All photos deleted'})
+        else:
+            return jsonify({'success': False, 'error': result})
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
+
 # ============================================================================
 # USER ROUTES (for outreach)
 # ============================================================================
@@ -637,8 +703,13 @@ def edit_account(account_id):
 def users_list():
     """List all users for outreach"""
     users = sheets_manager.users
+    
+    # Get all campaigns for filter dropdown
+    user_id = session['user_id']
+    campaigns_list = db.get_user_campaigns(user_id, limit=100)
+    campaigns = [(c['id'], c['name']) for c in campaigns_list]
 
-    return render_template('users.html', users=users)
+    return render_template('users.html', users=users, campaigns=campaigns)
 
 
 @app.route('/users/add', methods=['POST'])
@@ -682,6 +753,89 @@ def add_user():
 
     flash('User added successfully', 'success')
     return redirect(url_for('users_list'))
+
+
+@app.route('/users/bulk-delete', methods=['POST'])
+@login_required
+def bulk_delete_users():
+    """Delete multiple users"""
+    try:
+        data = request.get_json()
+        user_ids = data.get('user_ids', [])
+        
+        if not user_ids:
+            return jsonify({'success': False, 'error': 'No users selected'})
+        
+        count = sheets_manager.delete_users(user_ids)
+        
+        return jsonify({'success': True, 'count': count})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/users/import-csv', methods=['POST'])
+@login_required
+def import_csv_users():
+    """Import users from CSV/Excel file"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'})
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No file selected'})
+        
+        # Read file based on extension
+        import pandas as pd
+        
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(file)
+        elif file.filename.endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(file)
+        else:
+            return jsonify({'success': False, 'error': 'Unsupported file format. Use CSV or Excel.'})
+        
+        # Expected columns: username, user_id, phone, priority (all optional)
+        count = 0
+        for _, row in df.iterrows():
+            user_data = {}
+            
+            if 'username' in df.columns and pd.notna(row['username']):
+                user_data['username'] = str(row['username']).strip().lstrip('@')
+            
+            if 'user_id' in df.columns and pd.notna(row['user_id']):
+                try:
+                    user_data['user_id'] = int(row['user_id'])
+                except:
+                    continue
+            
+            if 'phone' in df.columns and pd.notna(row['phone']):
+                user_data['phone'] = str(row['phone']).strip()
+            
+            if 'priority' in df.columns and pd.notna(row['priority']):
+                try:
+                    user_data['priority'] = int(row['priority'])
+                except:
+                    user_data['priority'] = 1
+            else:
+                user_data['priority'] = 1
+            
+            # Skip if no identifiers
+            if not user_data.get('username') and not user_data.get('user_id') and not user_data.get('phone'):
+                continue
+            
+            user_data['status'] = 'pending'
+            sheets_manager.add_user(user_data)
+            count += 1
+        
+        return jsonify({'success': True, 'count': count})
+        
+    except ImportError:
+        return jsonify({'success': False, 'error': 'pandas library not installed. Install with: pip install pandas openpyxl'})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
 
 
 # ============================================================================

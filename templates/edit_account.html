@@ -113,10 +113,20 @@
                         >
                         <div class="form-text">
                             <i class="bi bi-info-circle"></i>
-                            You can upload multiple photos to create a carousel. The first photo will become your profile picture.
+                            Upload new photos. <strong>First photo will replace all existing photos</strong>, additional photos will be added to carousel.
                             <br>
                             Supported formats: JPG, PNG. Max file size: 10MB each.
                         </div>
+                    </div>
+
+                    <!-- Delete Photos Button -->
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteAllPhotos()">
+                            <i class="bi bi-trash"></i> Delete All Profile Photos
+                        </button>
+                        <small class="d-block text-muted mt-2">
+                            This will remove all photos from your Telegram profile
+                        </small>
                     </div>
 
                     <div class="alert alert-info" role="alert">
@@ -174,6 +184,43 @@
 </style>
 
 <script>
+function deleteAllPhotos() {
+    if (!confirm('Are you sure you want to delete ALL profile photos? This action cannot be undone.')) {
+        return;
+    }
+    
+    const accountId = '{{ account.id }}';
+    
+    // Show loading state
+    const btn = event.target.closest('button');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Deleting...';
+    
+    // Send POST request
+    fetch(`/accounts/delete-photos/${accountId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('All photos deleted successfully!');
+            window.location.reload();
+        } else {
+            alert('Error: ' + data.error);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-trash"></i> Delete All Profile Photos';
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-trash"></i> Delete All Profile Photos';
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.querySelector('form');
     const submitBtn = document.getElementById('submitBtn');
