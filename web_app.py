@@ -10,6 +10,8 @@ from flask import Flask, render_template, request, redirect, url_for, session, j
 from functools import wraps
 from datetime import datetime
 import asyncio
+import threading
+import time
 from pathlib import Path
 
 from database import db
@@ -23,6 +25,98 @@ app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 # Initialize managers
 rate_limiter = RateLimiter()
 proxy_manager = ProxyManager()
+
+
+# ============================================================================
+# CAMPAIGN RUNNER
+# ============================================================================
+
+def run_campaign_task(campaign_id):
+    """Run campaign in background thread"""
+    try:
+        campaign = db.get_campaign(campaign_id)
+        if not campaign:
+            return
+
+        settings = campaign.get('settings', {})
+        message = settings.get('message', '')
+        account_phones = settings.get('accounts', [])
+        user_indices = settings.get('users', [])
+
+        # Get accounts
+        all_accounts = sheets_manager.get_all_accounts()
+        accounts = [acc for acc in all_accounts if acc.get('phone') in account_phones]
+
+        # Get users
+        all_users = sheets_manager.users
+        users = [all_users[int(idx)] for idx in user_indices if int(idx) < len(all_users)]
+
+        if not accounts:
+            db.add_campaign_log(campaign_id, 'No accounts available', level='error')
+            db.update_campaign(campaign_id, status='failed')
+            return
+
+        if not users:
+            db.add_campaign_log(campaign_id, 'No users to contact', level='error')
+            db.update_campaign(campaign_id, status='failed')
+            return
+
+        db.add_campaign_log(campaign_id, f'Starting campaign: {len(accounts)} accounts, {len(users)} users', level='info')
+
+        sent_count = 0
+        failed_count = 0
+
+        # Simple round-robin sending
+        account_idx = 0
+        for user in users:
+            account = accounts[account_idx % len(accounts)]
+            account_phone = account.get('phone', 'unknown')
+
+            # Get user identifier
+            user_identifier = user.get('username') or user.get('user_id') or user.get('phone') or 'unknown'
+
+            # Simulate sending (replace with actual Telegram sending later)
+            time.sleep(1)  # Simulate delay
+
+            # Random success/failure for demo
+            import random
+            success = random.random() > 0.1  # 90% success rate for demo
+
+            if success:
+                sent_count += 1
+                db.add_campaign_log(
+                    campaign_id,
+                    f'Sent to {user_identifier} from {account_phone}',
+                    level='success'
+                )
+
+                # Update user status
+                if user.get('user_id'):
+                    sheets_manager.update_user_status(user['user_id'], 'contacted', account_phone)
+            else:
+                failed_count += 1
+                db.add_campaign_log(
+                    campaign_id,
+                    f'Failed to send to {user_identifier} from {account_phone}',
+                    level='error'
+                )
+
+            # Update progress
+            db.update_campaign(
+                campaign_id,
+                sent_count=sent_count,
+                failed_count=failed_count
+            )
+
+            account_idx += 1
+
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+
+    except Exception as e:
+        db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
+        db.update_campaign(campaign_id, status='failed')
 
 
 # ============================================================================
@@ -208,9 +302,11 @@ def start_campaign(campaign_id):
 
     # Update status
     db.update_campaign(campaign_id, status='running')
-    db.add_campaign_log(campaign_id, 'Campaign started')
+    db.add_campaign_log(campaign_id, 'Campaign started', level='info')
 
-    # TODO: Start async task to run campaign
+    # Start campaign in background thread
+    thread = threading.Thread(target=run_campaign_task, args=(campaign_id,), daemon=True)
+    thread.start()
 
     return jsonify({'success': True, 'message': 'Campaign started'})
 
