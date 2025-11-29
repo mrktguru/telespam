@@ -57,9 +57,9 @@ async def process_tdata(zip_path: str, notes: str = "") -> Dict:
         tdesk = TDesktop(str(tdata_path))
         session_path = config.SESSIONS_DIR / f"{uuid4()}"
 
+        # Convert to Telethon (flag parameter not needed for tdata)
         telethon_client = await tdesk.ToTelethon(
-            session=str(session_path),
-            flag=API.TelegramDesktop
+            session=str(session_path)
         )
 
         # 4. Check and get account info
