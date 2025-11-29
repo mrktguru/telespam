@@ -179,6 +179,26 @@ class MockSheetsManager:
 
     # Users operations
 
+    def add_user(self, user_data: Dict) -> bool:
+        """Add new user for outreach"""
+        # Generate a unique ID if user_id not provided
+        if not user_data.get('user_id'):
+            # Use timestamp-based ID
+            import time
+            user_data['user_id'] = int(time.time() * 1000)
+
+        # Add timestamp
+        user_data['added_at'] = datetime.now().isoformat()
+
+        # Set default status if not provided
+        if 'status' not in user_data:
+            user_data['status'] = 'pending'
+
+        self.users.append(user_data)
+        self._save_to_file()
+        print(f"✓ User added: {user_data.get('username') or user_data.get('user_id') or user_data.get('phone')}")
+        return True
+
     def get_pending_users(self, limit: int = 10) -> List[Dict]:
         """Get users with status 'pending'"""
         pending = [u for u in self.users if u.get('status') == 'pending']
