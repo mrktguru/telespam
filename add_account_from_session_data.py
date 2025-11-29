@@ -43,8 +43,11 @@ async def create_session_file(session_path: str, auth_key: bytes, dc_id: int):
     server_address, port = dc_addresses[dc_id]
 
     # Create a temporary client to initialize the session structure
-    # Use dummy API credentials since we'll replace the auth_key anyway
-    temp_client = TelegramClient(session_path, api_id=1, api_hash='x' * 32)
+    # Use Telegram Desktop's public API credentials
+    TELEGRAM_DESKTOP_API_ID = 611335
+    TELEGRAM_DESKTOP_API_HASH = "d524b414d21f4d37f08684c1df41ac9c"
+
+    temp_client = TelegramClient(session_path, api_id=TELEGRAM_DESKTOP_API_ID, api_hash=TELEGRAM_DESKTOP_API_HASH)
 
     # Don't connect, just create the session file structure
     # This will create the proper SQLite structure
@@ -175,12 +178,15 @@ async def add_account_from_session_data():
 
         from telethon import TelegramClient
 
-        # Note: We don't have API ID/Hash, but we can use dummy values
-        # since we already have auth_key
+        # Use Telegram Desktop's public API credentials
+        # These are official and publicly known
+        TELEGRAM_DESKTOP_API_ID = 611335
+        TELEGRAM_DESKTOP_API_HASH = "d524b414d21f4d37f08684c1df41ac9c"
+
         client = TelegramClient(
             str(session_file.with_suffix('')),
-            api_id=1,  # Dummy value
-            api_hash='x' * 32  # Dummy value
+            api_id=TELEGRAM_DESKTOP_API_ID,
+            api_hash=TELEGRAM_DESKTOP_API_HASH
         )
 
         await client.connect()
@@ -213,6 +219,10 @@ async def add_account_from_session_data():
 
         account_id = f"acc_{session_name}"
 
+        # Use Telegram Desktop credentials
+        TELEGRAM_DESKTOP_API_ID = 611335
+        TELEGRAM_DESKTOP_API_HASH = "d524b414d21f4d37f08684c1df41ac9c"
+
         account_data = {
             'id': account_id,
             'phone': me.phone,
@@ -221,8 +231,8 @@ async def add_account_from_session_data():
             'last_name': me.last_name or '',
             'user_id': me.id,
             'session_file': str(session_file),
-            'api_id': 1,  # Dummy
-            'api_hash': 'x' * 32,  # Dummy
+            'api_id': TELEGRAM_DESKTOP_API_ID,
+            'api_hash': TELEGRAM_DESKTOP_API_HASH,
             'status': 'warming',
             'daily_sent': 0,
             'total_sent': 0,
