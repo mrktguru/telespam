@@ -10,13 +10,57 @@
     </a>
 </div>
 
+<!-- Filters -->
+<div class="card mb-3">
+    <div class="card-body">
+        <form id="filterForm" class="row g-3">
+            <div class="col-md-3">
+                <label for="filterName" class="form-label">Campaign Name</label>
+                <input type="text" class="form-control" id="filterName" placeholder="Search...">
+            </div>
+            <div class="col-md-2">
+                <label for="filterId" class="form-label">Campaign ID</label>
+                <input type="text" class="form-control" id="filterId" placeholder="ID...">
+            </div>
+            <div class="col-md-2">
+                <label for="filterStatus" class="form-label">Status</label>
+                <select class="form-select" id="filterStatus">
+                    <option value="">All</option>
+                    <option value="draft">Draft</option>
+                    <option value="running">Running</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="filterSent" class="form-label">Sent/Total</label>
+                <select class="form-select" id="filterSent">
+                    <option value="">All</option>
+                    <option value="0">0%</option>
+                    <option value="1-50">1-50%</option>
+                    <option value="51-99">51-99%</option>
+                    <option value="100">100%</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="filterDate" class="form-label">Created</label>
+                <input type="date" class="form-control" id="filterDate">
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <button type="button" class="btn btn-secondary w-100" onclick="clearFilters()">Clear</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 {% if campaigns %}
 <div class="card">
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover mb-0">
+            <table class="table table-hover mb-0" id="campaignsTable">
                 <thead>
                     <tr>
+                        <th>ID</th>
                         <th>Name</th>
                         <th>Status</th>
                         <th>Progress</th>
@@ -27,7 +71,15 @@
                 </thead>
                 <tbody>
                     {% for campaign in campaigns %}
-                    <tr>
+                    {% set percent = ((campaign.sent_count / campaign.total_users * 100) | int) if campaign.total_users > 0 else 0 %}
+                    <tr data-campaign-id="{{ campaign.id }}"
+                        data-campaign-name="{{ campaign.name | lower }}"
+                        data-status="{{ campaign.status }}"
+                        data-percent="{{ percent }}"
+                        data-created="{{ campaign.created_at[:10] }}">
+                        <td>
+                            <code>#{{ campaign.id }}</code>
+                        </td>
                         <td>
                             <strong>{{ campaign.name }}</strong>
                         </td>
@@ -103,4 +155,65 @@
     </div>
 </div>
 {% endif %}
+
+<script>
+// Filter functionality
+function applyFilters() {
+    const nameFilter = document.getElementById('filterName').value.toLowerCase();
+    const idFilter = document.getElementById('filterId').value.toLowerCase();
+    const statusFilter = document.getElementById('filterStatus').value;
+    const sentFilter = document.getElementById('filterSent').value;
+    const dateFilter = document.getElementById('filterDate').value;
+    
+    const rows = document.querySelectorAll('#campaignsTable tbody tr');
+    
+    rows.forEach(row => {
+        const campaignId = row.dataset.campaignId.toLowerCase();
+        const campaignName = row.dataset.campaignName;
+        const status = row.dataset.status;
+        const percent = parseInt(row.dataset.percent);
+        const created = row.dataset.created;
+        
+        let show = true;
+        
+        // Name filter
+        if (nameFilter && !campaignName.includes(nameFilter)) show = false;
+        
+        // ID filter
+        if (idFilter && !campaignId.includes(idFilter)) show = false;
+        
+        // Status filter
+        if (statusFilter && status !== statusFilter) show = false;
+        
+        // Sent/Total filter
+        if (sentFilter) {
+            if (sentFilter === '0' && percent !== 0) show = false;
+            if (sentFilter === '1-50' && (percent < 1 || percent > 50)) show = false;
+            if (sentFilter === '51-99' && (percent < 51 || percent > 99)) show = false;
+            if (sentFilter === '100' && percent !== 100) show = false;
+        }
+        
+        // Date filter
+        if (dateFilter && created !== dateFilter) show = false;
+        
+        row.style.display = show ? '' : 'none';
+    });
+}
+
+function clearFilters() {
+    document.getElementById('filterName').value = '';
+    document.getElementById('filterId').value = '';
+    document.getElementById('filterStatus').value = '';
+    document.getElementById('filterSent').value = '';
+    document.getElementById('filterDate').value = '';
+    applyFilters();
+}
+
+// Auto-apply filters
+document.getElementById('filterName').addEventListener('input', applyFilters);
+document.getElementById('filterId').addEventListener('input', applyFilters);
+document.getElementById('filterStatus').addEventListener('change', applyFilters);
+document.getElementById('filterSent').addEventListener('change', applyFilters);
+document.getElementById('filterDate').addEventListener('change', applyFilters);
+</script>
 {% endblock %}
