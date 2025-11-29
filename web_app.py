@@ -270,16 +270,36 @@ def users_list():
 @login_required
 def add_user():
     """Add user for outreach"""
-    username = request.form.get('username')
-    user_id = request.form.get('user_id')
-    phone = request.form.get('phone')
-    priority = int(request.form.get('priority', 1))
+    username = request.form.get('username', '').strip()
+    user_id = request.form.get('user_id', '').strip()
+    phone = request.form.get('phone', '').strip()
+    priority = request.form.get('priority', '1').strip()
+
+    # Convert user_id to int if provided and valid
+    user_id_int = None
+    if user_id:
+        try:
+            user_id_int = int(user_id)
+        except ValueError:
+            flash('Invalid user ID format', 'danger')
+            return redirect(url_for('users_list'))
+
+    # Convert priority to int
+    try:
+        priority_int = int(priority) if priority else 1
+    except ValueError:
+        priority_int = 1
+
+    # At least one identifier must be provided
+    if not username and not user_id_int and not phone:
+        flash('Please provide at least username, user ID, or phone number', 'danger')
+        return redirect(url_for('users_list'))
 
     user_data = {
-        'username': username,
-        'user_id': int(user_id) if user_id else None,
-        'phone': phone,
-        'priority': priority,
+        'username': username if username else None,
+        'user_id': user_id_int,
+        'phone': phone if phone else None,
+        'priority': priority_int,
         'status': 'pending'
     }
 
