@@ -35,8 +35,8 @@ proxy_manager = ProxyManager()
 # CAMPAIGN RUNNER
 # ============================================================================
 
-async def send_message_to_user(account, user, message_text):
-    """Send message to user via Telegram
+async def send_message_to_user(account, user, message_text, media_path=None, media_type=None):
+    """Send message to user via Telegram with optional media
 
     Returns: (success: bool, error_msg: str)
     """
@@ -100,8 +100,19 @@ async def send_message_to_user(account, user, message_text):
             await client.disconnect()
             return False, 'User not found'
 
-        # Send message
-        await client.send_message(target, message_text)
+        # Send message with or without media, using HTML parsing
+        if media_path and media_type and Path(media_path).exists():
+            # Send with media
+            if media_type == 'photo':
+                await client.send_file(target, media_path, caption=message_text, parse_mode='html')
+            elif media_type == 'video':
+                await client.send_file(target, media_path, caption=message_text, parse_mode='html')
+            elif media_type == 'audio':
+                await client.send_file(target, media_path, caption=message_text, parse_mode='html')
+        else:
+            # Send text only with HTML formatting
+            await client.send_message(target, message_text, parse_mode='html')
+            
         await client.disconnect()
 
         return True, None
@@ -129,6 +140,8 @@ def run_campaign_task(campaign_id):
 
         settings = campaign.get('settings', {})
         message = settings.get('message', '')
+        media_path = settings.get('media_path')
+        media_type = settings.get('media_type')
         account_phones = settings.get('accounts', [])
         user_indices = settings.get('users', [])
 
@@ -180,7 +193,7 @@ def run_campaign_task(campaign_id):
             # Send message via Telegram
             try:
                 success, error_msg = loop.run_until_complete(
-                    send_message_to_user(account, user, message)
+                    send_message_to_user(account, user, message, media_path, media_type)
                 )
 
                 if success:
@@ -403,12 +416,39 @@ def new_campaign():
         name = request.form.get('name')
         message = request.form.get('message')
 
+        # Handle media upload
+        media_path = None
+        media_type = None
+        if 'media' in request.files:
+            media_file = request.files['media']
+            if media_file and media_file.filename:
+                # Create uploads directory
+                upload_dir = Path(__file__).parent / 'uploads' / 'campaigns'
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Save file with unique name
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"{timestamp}_{media_file.filename}"
+                media_path = str(upload_dir / filename)
+                media_file.save(media_path)
+                
+                # Determine media type
+                ext = media_file.filename.lower().rsplit('.', 1)[-1]
+                if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
+                    media_type = 'photo'
+                elif ext in ['mp4', 'avi', 'mov', 'mkv']:
+                    media_type = 'video'
+                elif ext in ['mp3', 'ogg', 'wav', 'm4a']:
+                    media_type = 'audio'
+
         # Get selected accounts and users
         account_ids = request.form.getlist('accounts')
         user_ids = request.form.getlist('users')
 
         settings = {
             'message': message,
+            'media_path': media_path,
+            'media_type': media_type,
             'accounts': account_ids,
             'users': user_ids
         }
@@ -567,7 +607,7 @@ def view_conversation(conversation_id):
 @app.route('/conversations/<int:conversation_id>/send', methods=['POST'])
 @login_required
 def send_conversation_message(conversation_id):
-    """Send a new message in the conversation"""
+    """Send a new message in the conversation with optional media"""
     conversation = db.get_conversation(conversation_id)
     
     if not conversation:
@@ -577,6 +617,31 @@ def send_conversation_message(conversation_id):
     if not message_text:
         flash('Message text is required', 'danger')
         return redirect(url_for('view_conversation', conversation_id=conversation_id))
+    
+    # Handle media upload
+    media_path = None
+    media_type = None
+    if 'media' in request.files:
+        media_file = request.files['media']
+        if media_file and media_file.filename:
+            # Create uploads directory
+            upload_dir = Path(__file__).parent / 'uploads' / 'conversations'
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save file with unique name
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{timestamp}_{media_file.filename}"
+            media_path = str(upload_dir / filename)
+            media_file.save(media_path)
+            
+            # Determine media type
+            ext = media_file.filename.lower().rsplit('.', 1)[-1]
+            if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
+                media_type = 'photo'
+            elif ext in ['mp4', 'avi', 'mov', 'mkv']:
+                media_type = 'video'
+            elif ext in ['mp3', 'ogg', 'wav', 'm4a']:
+                media_type = 'audio'
     
     # Get account
     account = sheets_manager.get_account(conversation['sender_account_id'])
@@ -600,7 +665,7 @@ def send_conversation_message(conversation_id):
         user_id = int(conversation['recipient_user_id'])
         
         async def send_msg():
-            """Send message via Telegram"""
+            """Send message via Telegram with media and HTML formatting"""
             client = TelegramClient(
                 str(session_file.with_suffix('')),
                 config.API_ID,
@@ -613,8 +678,18 @@ def send_conversation_message(conversation_id):
                 if not await client.is_user_authorized():
                     return False, 'Account not authorized'
                 
-                # Send message
-                await client.send_message(user_id, message_text)
+                # Send message with or without media, using HTML parsing
+                if media_path and media_type and Path(media_path).exists():
+                    # Send with media
+                    if media_type == 'photo':
+                        await client.send_file(user_id, media_path, caption=message_text, parse_mode='html')
+                    elif media_type == 'video':
+                        await client.send_file(user_id, media_path, caption=message_text, parse_mode='html')
+                    elif media_type == 'audio':
+                        await client.send_file(user_id, media_path, caption=message_text, parse_mode='html')
+                else:
+                    # Send text only with HTML formatting
+                    await client.send_message(user_id, message_text, parse_mode='html')
                 
                 return True, None
             except Exception as e:
