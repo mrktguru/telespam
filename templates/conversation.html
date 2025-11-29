@@ -77,27 +77,47 @@
     </div>
 </div>
 
-<!-- Send Message Card -->
-<div class="card">
-    <div class="card-header bg-white">
-        <h5 class="card-title mb-0">Send New Message</h5>
+<!-- Send & Receive Message Card -->
+<div class="row mb-4">
+    <!-- Send Message -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="card-title mb-0"><i class="bi bi-send"></i> Send Message</h5>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('send_conversation_message', conversation_id=conversation.id) }}" method="POST">
+                    <div class="mb-3">
+                        <textarea class="form-control" name="message" rows="3" required 
+                                  placeholder="Type your message here..."></textarea>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted">
+                            From: <strong>{{ conversation.sender_account_id }}</strong>
+                        </small>
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-send"></i> Send
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
-    <div class="card-body">
-        <form action="{{ url_for('send_conversation_message', conversation_id=conversation.id) }}" method="POST">
-            <div class="mb-3">
-                <label for="message" class="form-label">Message</label>
-                <textarea class="form-control" id="message" name="message" rows="4" required 
-                          placeholder="Type your message here..."></textarea>
+
+    <!-- Receive Message -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="card-title mb-0"><i class="bi bi-arrow-repeat"></i> Receive Messages</h5>
             </div>
-            <div class="d-flex justify-content-between align-items-center">
-                <small class="text-muted">
-                    <i class="bi bi-info-circle"></i> This will be sent from account: <strong>{{ conversation.sender_account_id }}</strong>
-                </small>
-                <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-send"></i> Send Message
+            <div class="card-body">
+                <p class="text-muted mb-3">Fetch incoming messages from Telegram conversation</p>
+                <button class="btn btn-success btn-sm w-100" id="receiveBtn" onclick="fetchMessages()">
+                    <i class="bi bi-arrow-repeat"></i> Receive Message
                 </button>
+                <small class="text-muted d-block mt-2">Click to sync messages from Telegram</small>
             </div>
-        </form>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -111,5 +131,34 @@ window.addEventListener('load', function() {
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 });
+
+// Fetch new messages from Telegram
+function fetchMessages() {
+    const btn = document.getElementById('receiveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Loading...';
+    
+    fetch("{{ url_for('fetch_conversation_messages', conversation_id=conversation.id) }}", {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Fetched ${data.total} messages, added ${data.new_messages} new messages`);
+            // Reload page to show new messages
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Receive Message';
+    })
+    .catch(err => {
+        console.error('Error:', err);
+        alert('Error fetching messages: ' + err.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Receive Message';
+    });
+}
 </script>
 {% endblock %}

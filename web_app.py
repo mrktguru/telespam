@@ -587,36 +587,145 @@ def send_conversation_message(conversation_id):
     # Send message via Telegram
     try:
         import asyncio
-        from start_outreach_cli import send_message_to_user
+        from pathlib import Path
+        
+        phone = account.get('phone')
+        session_file = Path(__file__).parent / 'sessions' / f'{phone.replace("+", "")}.session'
+        
+        if not session_file.exists():
+            flash('Session file not found', 'danger')
+            return redirect(url_for('view_conversation', conversation_id=conversation_id))
         
         # Create user object
-        user = {
-            'user_id': conversation['recipient_user_id'],
-            'username': conversation['recipient_username']
-        }
+        user_id = int(conversation['recipient_user_id'])
         
-        # Get settings
-        settings = sheets_manager.get_settings()
+        async def send_msg():
+            """Send message via Telegram"""
+            client = TelegramClient(
+                str(session_file.with_suffix('')),
+                config.API_ID,
+                config.API_HASH
+            )
+            
+            try:
+                await client.connect()
+                
+                if not await client.is_user_authorized():
+                    return False, 'Account not authorized'
+                
+                # Send message
+                await client.send_message(user_id, message_text)
+                
+                return True, None
+            except Exception as e:
+                return False, str(e)
+            finally:
+                try:
+                    await client.disconnect()
+                except:
+                    pass
         
         # Send message
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(
-            send_message_to_user(account, user, message_text, settings)
-        )
+        success, error = loop.run_until_complete(send_msg())
         loop.close()
         
-        if result.get('success'):
+        if success:
             # Save message to database
             db.add_message(conversation_id, 'outgoing', message_text)
             flash('Message sent successfully', 'success')
         else:
-            flash(f'Failed to send message: {result.get("error")}', 'danger')
+            flash(f'Failed to send message: {error}', 'danger')
             
     except Exception as e:
         flash(f'Error sending message: {str(e)}', 'danger')
     
     return redirect(url_for('view_conversation', conversation_id=conversation_id))
+
+
+@app.route('/conversations/<int:conversation_id>/fetch-messages', methods=['POST'])
+@login_required
+def fetch_conversation_messages(conversation_id):
+    """Fetch incoming messages from conversation"""
+    conversation = db.get_conversation(conversation_id)
+    
+    if not conversation:
+        return jsonify({'error': 'Conversation not found'}), 404
+    
+    # Get account
+    account = sheets_manager.get_account(conversation['sender_account_id'])
+    if not account:
+        return jsonify({'error': 'Sender account not found'}), 404
+    
+    try:
+        import asyncio
+        from pathlib import Path
+        
+        phone = account.get('phone')
+        session_file = Path(__file__).parent / 'sessions' / f'{phone.replace("+", "")}.session'
+        
+        if not session_file.exists():
+            return jsonify({'error': 'Session file not found'}), 404
+        
+        user_id = int(conversation['recipient_user_id'])
+        
+        async def fetch_msgs():
+            """Fetch messages from Telegram"""
+            client = TelegramClient(
+                str(session_file.with_suffix('')),
+                config.API_ID,
+                config.API_HASH
+            )
+            
+            try:
+                await client.connect()
+                
+                if not await client.is_user_authorized():
+                    return [], 'Account not authorized'
+                
+                # Get conversation history
+                messages = []
+                async for message in client.iter_messages(user_id, limit=100):
+                    messages.append({
+                        'text': message.text,
+                        'is_out': message.is_out,  # True if sent by us, False if received
+                        'date': message.date.isoformat()
+                    })
+                
+                return list(reversed(messages)), None
+            except Exception as e:
+                return [], str(e)
+            finally:
+                try:
+                    await client.disconnect()
+                except:
+                    pass
+        
+        # Fetch messages
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        messages, error = loop.run_until_complete(fetch_msgs())
+        loop.close()
+        
+        if error:
+            return jsonify({'error': error}), 400
+        
+        # Get already saved message texts to avoid duplicates
+        saved_messages = {msg['message_text'] for msg in db.get_conversation_messages(conversation_id)}
+        
+        # Save new messages
+        new_count = 0
+        for msg in messages:
+            if msg['text'] and msg['text'] not in saved_messages:
+                direction = 'outgoing' if msg['is_out'] else 'incoming'
+                db.add_message(conversation_id, direction, msg['text'])
+                new_count += 1
+        
+        return jsonify({'success': True, 'new_messages': new_count, 'total': len(messages)})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 
 @app.route('/conversations/<int:conversation_id>/delete', methods=['POST'])
