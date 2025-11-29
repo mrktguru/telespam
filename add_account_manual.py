@@ -44,10 +44,30 @@ async def create_and_add_account():
         print("❌ API ID and Hash are required!")
         return 1
 
+    # Validate API Hash (should be 32 hex characters)
+    if len(api_hash) != 32:
+        print("❌ Invalid API Hash!")
+        print(f"   API Hash must be exactly 32 characters")
+        print(f"   You entered: {len(api_hash)} characters")
+        print()
+        print("💡 Get correct API Hash from https://my.telegram.org")
+        print("   It looks like: abc123def456...")
+        return 1
+
     try:
         api_id = int(api_id)
     except ValueError:
         print("❌ API ID must be a number!")
+        return 1
+
+    # Validate API ID range (must fit in 32-bit signed integer)
+    if api_id <= 0 or api_id > 2147483647:
+        print("❌ Invalid API ID!")
+        print(f"   API ID must be between 1 and 2147483647")
+        print(f"   You entered: {api_id}")
+        print()
+        print("💡 Get correct API ID from https://my.telegram.org")
+        print("   It's usually 7-8 digits (e.g., 1234567 or 12345678)")
         return 1
 
     # Get phone number
