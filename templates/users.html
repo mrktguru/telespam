@@ -65,7 +65,7 @@
                         </th>
                         <th>Username</th>
                         <th>User ID</th>
-                        <th>Campaign</th>
+                        <th>Campaign (Project ID)</th>
                         <th>Status</th>
                         <th>Priority</th>
                     </tr>
@@ -95,7 +95,11 @@
                         </td>
                         <td>
                             {% if user.campaign_id %}
-                                <span class="badge bg-primary">{{ user.campaign_name or user.campaign_id }}</span>
+                                <div>
+                                    <span class="badge bg-primary">{{ user.campaign_name or 'Campaign' }}</span>
+                                    <br>
+                                    <small class="text-muted">Project ID: <code>{{ user.campaign_id }}</code></small>
+                                </div>
                             {% else %}
                                 <span class="text-muted">-</span>
                             {% endif %}

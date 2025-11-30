@@ -117,14 +117,14 @@
                 
                 <!-- Filters -->
                 <div class="card-body border-bottom">
-                    <div class="row g-3">
-                        <div class="col-md-4">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-3">
                             <input type="text" class="form-control form-control-sm" id="filterUsername" placeholder="Search by username..." onkeyup="filterCampaignUsers()">
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <input type="text" class="form-control form-control-sm" id="filterUserId" placeholder="User ID..." onkeyup="filterCampaignUsers()">
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <select class="form-select form-select-sm" id="filterPriority" onchange="filterCampaignUsers()">
                                 <option value="">All Priorities</option>
                                 <option value="1">Priority 1</option>
@@ -134,6 +134,11 @@
                         </div>
                         <div class="col-md-2">
                             <button type="button" class="btn btn-sm btn-secondary w-100" onclick="clearCampaignFilters()">Clear</button>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="button" class="btn btn-sm btn-danger w-100" id="deleteSelectedUsersBtn" onclick="deleteSelectedCampaignUsers()" disabled>
+                                <i class="bi bi-trash"></i> Delete Selected (<span id="selectedCount">0</span>)
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -297,13 +302,79 @@ mike_wilson,555444333,+5554443333</pre>
 
 {% block extra_js %}
 <script>
-console.log("\n🚀 ============================================");
-console.log("🎯 TELESPAM CAMPAIGN JS v2.0 - BUILD 20241130_141841");
-console.log("✨ JavaScript successfully loaded and executing!");
-console.log("📅 Timestamp: " + new Date().toISOString());
-console.log("🔄 If you see this, cache is cleared!");
-console.log("============================================\n");
 console.log("Campaign JavaScript loaded");
+
+// SIMPLE TEST - this should always work
+console.log("🧪 TEST: Script is executing");
+
+// Define function FIRST, before anything else - GLOBALLY
+window.triggerFileUpload = function() {
+    const csvUpload = document.getElementById('csvUpload');
+    if (!csvUpload) {
+        console.error("❌ CSV upload element not found!");
+        alert("Error: File upload element not found!");
+        return false;
+    }
+    csvUpload.click();
+    return false;
+};
+
+(function() {
+    'use strict';
+    
+    // Simple button handler - attach when DOM is ready
+    let buttonHandlerAttached = false;
+    function setupButton() {
+        // Prevent duplicate handlers
+        if (buttonHandlerAttached) {
+            return true;
+        }
+        
+        const button = document.getElementById('importCsvButton');
+        if (!button) {
+            return false;
+        }
+        
+        // Remove any existing handlers by cloning
+        const newButton = button.cloneNode(true);
+        button.parentNode.replaceChild(newButton, button);
+        
+        // Add single click handler
+        newButton.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof window.triggerFileUpload === 'function') {
+                window.triggerFileUpload();
+            }
+            return false;
+        }, false);
+        
+        buttonHandlerAttached = true;
+        return true;
+    }
+    
+    // Try to setup immediately
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', setupButton);
+    } else {
+        if (!setupButton()) {
+            setTimeout(setupButton, 100);
+        }
+    }
+    
+    // Fallback
+    setTimeout(function() {
+        const button = document.getElementById('importCsvButton');
+        if (button && !button.onclick) {
+            setupButton();
+        }
+    }, 1000);
+})();
+
+// ========================================================================
+// REST OF THE CODE
+// ========================================================================
+
 // Check if SheetJS library is loaded
 if (typeof XLSX !== "undefined") {
     console.log("✅ SheetJS library loaded successfully");
@@ -341,12 +412,17 @@ function selectAllUsers() {
     const allChecked = Array.from(checkboxes).every(cb => cb.checked);
     checkboxes.forEach(cb => cb.checked = !allChecked);
     updateCounts();
-
+    updateSelectedCount();
 }
 
 
 document.querySelectorAll('.account-checkbox, .user-checkbox').forEach(cb => {
-    cb.addEventListener('change', updateCounts);
+    cb.addEventListener('change', function() {
+        updateCounts();
+        if (cb.classList.contains('user-checkbox')) {
+            updateSelectedCount();
+        }
+    });
 });
 
 updateCounts();
@@ -434,7 +510,21 @@ function updateUserCount() {
         table.style.display = 'none';
         message.style.display = 'block';
     }
+}
 
+function updateSelectedCount() {
+    const checkboxes = document.querySelectorAll('.user-checkbox:checked');
+    const selectedCount = checkboxes.length;
+    const countElement = document.getElementById('selectedCount');
+    const deleteBtn = document.getElementById('deleteSelectedUsersBtn');
+    
+    if (countElement) {
+        countElement.textContent = selectedCount;
+    }
+    
+    if (deleteBtn) {
+        deleteBtn.disabled = selectedCount === 0;
+    }
 }
 
 
@@ -451,7 +541,7 @@ function addCampaignUser(username, user_id, phone, priority = 1) {
     campaignUsers.push(user);
     renderCampaignUsers();
     updateUserCount();
-
+    updateSelectedCount();
 }
 
 
@@ -459,7 +549,32 @@ function removeCampaignUser(tempId) {
     campaignUsers = campaignUsers.filter(user => user.id !== tempId);
     renderCampaignUsers();
     updateUserCount();
+    updateSelectedCount();
+}
 
+function deleteSelectedCampaignUsers() {
+    const checkboxes = document.querySelectorAll('.user-checkbox:checked');
+    if (checkboxes.length === 0) {
+        alert('Please select users to delete');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete ${checkboxes.length} user(s)?`)) {
+        return;
+    }
+    
+    const selectedIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+    campaignUsers = campaignUsers.filter(user => !selectedIds.includes(user.id));
+    
+    renderCampaignUsers();
+    updateUserCount();
+    updateSelectedCount();
+    
+    // Clear "select all" checkbox
+    const selectAll = document.getElementById('selectAllUsers');
+    if (selectAll) {
+        selectAll.checked = false;
+    }
 }
 
 
@@ -471,7 +586,7 @@ function renderCampaignUsers() {
         const row = document.createElement('tr');
         row.innerHTML = `
             <td>
-                <input type="checkbox" class="form-check-input user-checkbox" name="campaign_users" value="${user.id}">
+                <input type="checkbox" class="form-check-input user-checkbox" name="campaign_users" value="${user.id}" onchange="updateSelectedCount()">
             </td>
             <td>@${user.username || 'N/A'}</td>
             <td>${user.user_id || ''}</td>
@@ -488,6 +603,8 @@ function renderCampaignUsers() {
         tbody.appendChild(row);
     });
 
+    // Update selected count after rendering
+    updateSelectedCount();
 }
 
 
@@ -525,7 +642,7 @@ function clearCampaignFilters() {
 function toggleAllCampaignUsers(checkbox) {
     const checkboxes = document.querySelectorAll('.user-checkbox');
     checkboxes.forEach(cb => cb.checked = checkbox.checked);
-
+    updateSelectedCount();
 }
 
 
@@ -648,6 +765,9 @@ function handleFileImport(event) {
                 status.className = 'alert alert-success m-3';
                 status.innerHTML = `<i class="bi bi-check-circle"></i> Imported ${imported} users from Excel! (${skipped} rows skipped)`;
                 
+                // Update selected count after import
+                updateSelectedCount();
+                
                 setTimeout(() => {
                     status.style.display = 'none';
                 }, 5000);
@@ -737,6 +857,9 @@ function handleFileImport(event) {
                 status.className = 'alert alert-success m-3';
                 status.innerHTML = `<i class="bi bi-check-circle"></i> Imported ${imported} users from CSV! (${skipped} rows skipped)`;
                 
+                // Update selected count after import
+                updateSelectedCount();
+                
                 setTimeout(() => {
                     status.style.display = 'none';
                 }, 5000);
@@ -765,22 +888,6 @@ function handleFileImport(event) {
 console.log("handleFileImport function defined and assigned to window");
 window.handleFileImport = handleFileImport;
 
-// Trigger file upload dialog - make it globally available
-function triggerFileUpload() {
-    console.log("🔘 Import button clicked!");
-    const csvUpload = document.getElementById('csvUpload');
-    if (csvUpload) {
-        console.log("📋 Triggering file dialog for element:", csvUpload);
-        csvUpload.click();
-    } else {
-        console.error("❌ CSV upload element not found when button clicked!");
-        alert("Error: File upload element not found. Please refresh the page.");
-    }
-}
-
-// Make function globally available
-window.triggerFileUpload = triggerFileUpload;
-
 // Test function for debugging
 window.testFileImportSetup = function() {
     console.log("🧪 Testing file import setup...");
@@ -807,100 +914,31 @@ window.testFileImportSetup = function() {
     }
 };
 
-// Setup file import handler and button - simplified and reliable
+// Setup file import handler - only for file input, button is handled separately
 function setupFileImportHandler() {
-    console.log("🔧 Setting up file import handler...");
-    
     const csvUpload = document.getElementById("csvUpload");
-    const importButton = document.getElementById("importCsvButton");
     
     if (!csvUpload) {
-        console.error("❌ CSV upload element NOT found!");
-        // Try again after a short delay
         setTimeout(setupFileImportHandler, 500);
         return;
     }
-    
-    if (!importButton) {
-        console.error("❌ Import button NOT found!");
-        // Try again after a short delay
-        setTimeout(setupFileImportHandler, 500);
-        return;
-    }
-    
-    console.log("✅ Both elements found");
-    
-    // Setup file input change handler
-    console.log("✅ Setting up file input change handler");
-    
-    // Remove existing handlers by replacing onchange
-    csvUpload.onchange = null;
-    
-    // Add the handler with explicit logging
-    csvUpload.addEventListener("change", function(event) {
-        console.log("📂 File input change event triggered!");
-        console.log("📂 Event:", event);
-        console.log("📂 Files:", event.target.files);
-        if (event.target.files && event.target.files.length > 0) {
-            console.log("📂 Processing file:", event.target.files[0].name);
-            handleFileImport(event);
-        } else {
-            console.warn("📂 No files in event");
-        }
-    }, false);
-    
-    // Also set onchange as backup
-    csvUpload.onchange = function(event) {
-        console.log("📂 File input onchange triggered (backup)!");
-        if (event.target.files && event.target.files.length > 0) {
-            handleFileImport(event);
-        }
-    };
-    
-    console.log("✅ File input handler attached");
-    
-    // Setup button click handler
-    console.log("✅ Setting up button click handler");
     
     // Remove existing handlers
-    importButton.onclick = null;
+    csvUpload.onchange = null;
     
-    // Add click handler
-    importButton.addEventListener("click", function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log("🔘 Import button clicked!");
+    // Add the handler
+        csvUpload.addEventListener("change", function(event) {
+        if (event.target.files && event.target.files.length > 0) {
+            handleFileImport(event);
+        }
+        }, false);
         
-        // Get fresh reference to csvUpload element
-        const currentCsvUpload = document.getElementById("csvUpload");
-        if (currentCsvUpload) {
-            console.log("📋 Triggering file dialog...");
-            currentCsvUpload.click();
-        } else {
-            console.error("❌ CSV upload element not found when button clicked!");
-            alert("Error: File upload element not found. Please refresh the page.");
+    // Also set onchange as backup
+    csvUpload.onchange = function(event) {
+        if (event.target.files && event.target.files.length > 0) {
+            handleFileImport(event);
         }
-        return false;
-    }, false);
-    
-    // Also set onclick as backup
-    importButton.onclick = function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log("🔘 Import button onclick triggered (backup)!");
-        const currentCsvUpload = document.getElementById("csvUpload");
-        if (currentCsvUpload) {
-            currentCsvUpload.click();
-        }
-        return false;
     };
-    
-    // Mark as attached
-    csvUpload.setAttribute('data-handler-attached', 'true');
-    importButton.setAttribute('data-handler-attached', 'true');
-    
-    console.log("✅ Button click handler attached successfully");
-    console.log("✅ All handlers setup complete");
 }
 
 // Setup when DOM is ready - multiple methods for reliability
@@ -910,7 +948,7 @@ function setupFileImportHandler() {
     
     function init() {
         console.log("📄 Running initialization...");
-        setupFileImportHandler();
+    setupFileImportHandler();
     }
     
     // Method 1: If DOM is already loaded
@@ -943,7 +981,7 @@ function setupFileImportHandler() {
     });
     
     // Method 4: Final fallback after delay
-    setTimeout(function() {
+setTimeout(function() {
         console.log("⏱️ Delayed setup attempt (final fallback)");
         const csvUpload = document.getElementById("csvUpload");
         const importButton = document.getElementById("importCsvButton");
@@ -976,6 +1014,7 @@ function submitAddUser() {
     
     // Add user
     addCampaignUser(cleanUsername, user_id, phone, priority);
+    updateSelectedCount();
     
     // Clear form
     document.getElementById('addUserForm').reset();
@@ -999,4 +1038,6 @@ function prepareCampaignData() {
 
 // Initialize
 updateUserCount();
+updateSelectedCount();
+</script>
 {% endblock %}
