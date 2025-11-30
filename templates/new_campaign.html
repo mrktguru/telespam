@@ -105,7 +105,7 @@
                         </button>
                     </div>
                 </div>
-                <input type="file" id="csvUpload" accept=".csv,.xlsx,.xls" style="display: none;" onchange="handleFileImport(event)">
+                <input type="file" id="csvUpload" accept=".csv,.xlsx,.xls" style="display: none;" >
                 
                 <!-- Import Status -->
                 <div id="importStatus" class="alert alert-info m-3" style="display: none;"></div>
@@ -741,5 +741,16 @@ function prepareCampaignData() {
 
 
 // Initialize
+
+// Bind file upload handler when DOM is ready
+document.addEventListener("DOMContentLoaded", function() {
+    const csvUpload = document.getElementById("csvUpload");
+    if (csvUpload) {
+        csvUpload.addEventListener("change", handleFileImport);
+        console.log("File upload handler bound to input element");
+    } else {
+        console.error("CSV upload element not found");
+    }
+});
 updateUserCount();
 {% endblock %}
