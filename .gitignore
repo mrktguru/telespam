@@ -77,3 +77,6 @@ Thumbs.db
 test_*.csv
 test_*.xls
 test_*.xlsx
+test_csv_import.py
+test_import_endpoint.py
+run_dev_server.py
