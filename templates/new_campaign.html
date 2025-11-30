@@ -105,7 +105,7 @@
                         </button>
                     </div>
                 </div>
-                <input type="file" id="csvUpload" accept=".csv,.xlsx,.xls" style="display: none;" onchange="console.log("onchange triggered"); if (typeof handleFileImport === "function") { handleFileImport(event); } else { alert("handleFileImport not found! Available functions: " + Object.keys(window).filter(k => k.includes("handle")).join(", ")); }">
+                <input type="file" id="csvUpload" accept=".csv,.xlsx,.xls" style="display: none;" onchange="handleFileImport(event)">
                 
                 <!-- Import Status -->
                 <div id="importStatus" class="alert alert-info m-3" style="display: none;"></div>
