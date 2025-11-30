@@ -781,6 +781,32 @@ function triggerFileUpload() {
 // Make function globally available
 window.triggerFileUpload = triggerFileUpload;
 
+// Test function for debugging
+window.testFileImportSetup = function() {
+    console.log("🧪 Testing file import setup...");
+    const csvUpload = document.getElementById("csvUpload");
+    const importButton = document.getElementById("importCsvButton");
+    
+    console.log("CSV Upload element:", csvUpload);
+    console.log("Import Button element:", importButton);
+    
+    if (csvUpload) {
+        console.log("CSV Upload has onchange:", csvUpload.onchange !== null);
+        console.log("CSV Upload has data-handler-attached:", csvUpload.getAttribute('data-handler-attached'));
+    }
+    
+    if (importButton) {
+        console.log("Import Button has onclick:", importButton.onclick !== null);
+        console.log("Import Button has data-handler-attached:", importButton.getAttribute('data-handler-attached'));
+    }
+    
+    // Try to trigger button click programmatically
+    if (importButton) {
+        console.log("🧪 Simulating button click...");
+        importButton.click();
+    }
+};
+
 // Setup file import handler and button - simplified and reliable
 function setupFileImportHandler() {
     console.log("🔧 Setting up file import handler...");
@@ -788,83 +814,148 @@ function setupFileImportHandler() {
     const csvUpload = document.getElementById("csvUpload");
     const importButton = document.getElementById("importCsvButton");
     
-    // Setup button click handler
-    if (importButton) {
-        console.log("✅ Import button found");
-        importButton.addEventListener("click", function(e) {
-            e.preventDefault();
-            console.log("🔘 Import button clicked!");
-            if (csvUpload) {
-                console.log("📋 Triggering file dialog...");
-                csvUpload.click();
-            } else {
-                console.error("❌ CSV upload element not found!");
-                alert("Error: File upload element not found. Please refresh the page.");
-            }
-        });
-        console.log("✅ Button click handler attached");
-    } else {
-        console.error("❌ Import button NOT found!");
-    }
-    
-    // Setup file input change handler
-    if (csvUpload) {
-        console.log("✅ CSV upload element found:", csvUpload);
-        
-        // Remove all existing event listeners by cloning the element
-        const newCsvUpload = csvUpload.cloneNode(true);
-        csvUpload.parentNode.replaceChild(newCsvUpload, csvUpload);
-        
-        // Add the handler to the new element with explicit logging
-        newCsvUpload.addEventListener("change", function(event) {
-            console.log("📂 File input change event triggered!");
-            console.log("📂 Event:", event);
-            console.log("📂 Files:", event.target.files);
-            if (event.target.files && event.target.files.length > 0) {
-                console.log("📂 Processing file:", event.target.files[0].name);
-                handleFileImport(event);
-            } else {
-                console.warn("📂 No files in event");
-            }
-        }, false);
-        
-        // Also set onchange as backup
-        newCsvUpload.onchange = function(event) {
-            console.log("📂 File input onchange triggered (backup)!");
-            if (event.target.files && event.target.files.length > 0) {
-                handleFileImport(event);
-            }
-        };
-        
-        console.log("✅ File import handler attached successfully");
-    } else {
+    if (!csvUpload) {
         console.error("❌ CSV upload element NOT found!");
         // Try again after a short delay
         setTimeout(setupFileImportHandler, 500);
+        return;
     }
+    
+    if (!importButton) {
+        console.error("❌ Import button NOT found!");
+        // Try again after a short delay
+        setTimeout(setupFileImportHandler, 500);
+        return;
+    }
+    
+    console.log("✅ Both elements found");
+    
+    // Setup file input change handler
+    console.log("✅ Setting up file input change handler");
+    
+    // Remove existing handlers by replacing onchange
+    csvUpload.onchange = null;
+    
+    // Add the handler with explicit logging
+    csvUpload.addEventListener("change", function(event) {
+        console.log("📂 File input change event triggered!");
+        console.log("📂 Event:", event);
+        console.log("📂 Files:", event.target.files);
+        if (event.target.files && event.target.files.length > 0) {
+            console.log("📂 Processing file:", event.target.files[0].name);
+            handleFileImport(event);
+        } else {
+            console.warn("📂 No files in event");
+        }
+    }, false);
+    
+    // Also set onchange as backup
+    csvUpload.onchange = function(event) {
+        console.log("📂 File input onchange triggered (backup)!");
+        if (event.target.files && event.target.files.length > 0) {
+            handleFileImport(event);
+        }
+    };
+    
+    console.log("✅ File input handler attached");
+    
+    // Setup button click handler
+    console.log("✅ Setting up button click handler");
+    
+    // Remove existing handlers
+    importButton.onclick = null;
+    
+    // Add click handler
+    importButton.addEventListener("click", function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log("🔘 Import button clicked!");
+        
+        // Get fresh reference to csvUpload element
+        const currentCsvUpload = document.getElementById("csvUpload");
+        if (currentCsvUpload) {
+            console.log("📋 Triggering file dialog...");
+            currentCsvUpload.click();
+        } else {
+            console.error("❌ CSV upload element not found when button clicked!");
+            alert("Error: File upload element not found. Please refresh the page.");
+        }
+        return false;
+    }, false);
+    
+    // Also set onclick as backup
+    importButton.onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log("🔘 Import button onclick triggered (backup)!");
+        const currentCsvUpload = document.getElementById("csvUpload");
+        if (currentCsvUpload) {
+            currentCsvUpload.click();
+        }
+        return false;
+    };
+    
+    // Mark as attached
+    csvUpload.setAttribute('data-handler-attached', 'true');
+    importButton.setAttribute('data-handler-attached', 'true');
+    
+    console.log("✅ Button click handler attached successfully");
+    console.log("✅ All handlers setup complete");
 }
 
-// Setup when DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() {
-        console.log("📄 DOMContentLoaded - setting up file handler");
+// Setup when DOM is ready - multiple methods for reliability
+(function() {
+    console.log("📄 Initializing file import handlers...");
+    console.log("📄 Document ready state:", document.readyState);
+    
+    function init() {
+        console.log("📄 Running initialization...");
         setupFileImportHandler();
+    }
+    
+    // Method 1: If DOM is already loaded
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        console.log("📄 DOM already ready, initializing immediately");
+        setTimeout(init, 100); // Small delay to ensure everything is ready
+    } else {
+        // Method 2: Wait for DOMContentLoaded
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log("📄 DOMContentLoaded fired, initializing");
+            init();
+        });
+    }
+    
+    // Method 3: Fallback after window load
+    window.addEventListener('load', function() {
+        console.log("📄 Window load fired, checking handlers...");
+        const csvUpload = document.getElementById("csvUpload");
+        const importButton = document.getElementById("importCsvButton");
+        if (csvUpload && importButton) {
+            // Check if handlers are attached
+            const hasHandler = csvUpload.onchange !== null || csvUpload.getAttribute('data-handler-attached') === 'true';
+            if (!hasHandler) {
+                console.log("⚠️ Handlers not attached, retrying...");
+                init();
+            } else {
+                console.log("✅ Handlers already attached");
+            }
+        }
     });
-} else {
-    // DOM is already ready
-    console.log("📄 DOM already ready - setting up file handler immediately");
-    setupFileImportHandler();
-}
-
-// Also try after a delay as fallback
-setTimeout(function() {
-    console.log("⏱️ Delayed setup attempt (fallback)");
-    const csvUpload = document.getElementById("csvUpload");
-    if (csvUpload && !csvUpload.onchange) {
-        console.log("⚠️ Handler not attached, retrying...");
-        setupFileImportHandler();
-    }
-}, 1000);
+    
+    // Method 4: Final fallback after delay
+    setTimeout(function() {
+        console.log("⏱️ Delayed setup attempt (final fallback)");
+        const csvUpload = document.getElementById("csvUpload");
+        const importButton = document.getElementById("importCsvButton");
+        if (csvUpload && importButton) {
+            const hasHandler = csvUpload.onchange !== null || csvUpload.getAttribute('data-handler-attached') === 'true';
+            if (!hasHandler) {
+                console.log("⚠️ Handlers still not attached, final retry...");
+                init();
+            }
+        }
+    }, 2000);
+})();
 
 
 
