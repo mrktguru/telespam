@@ -75,26 +75,36 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             await client.disconnect()
             return False, 'Account not authorized'
 
-        # Find user by username, user_id or phone
+        # Find user by priority: ID (1) -> Username (2) -> Phone (3)
         target = None
-        if user.get('username'):
+        
+        # Priority 1: User ID
+        if user.get('user_id'):
+            try:
+                target = await client.get_entity(int(user['user_id']))
+                print(f"DEBUG: Found user by ID: {user['user_id']}")
+            except Exception as e:
+                print(f"DEBUG: Failed to find user by ID {user['user_id']}: {e}")
+                pass
+
+        # Priority 2: Username (only if ID not found or not provided)
+        if not target and user.get('username'):
             username = user['username'].lstrip('@')
             try:
                 target = await client.get_entity(username)
+                print(f"DEBUG: Found user by username: {username}")
             except Exception as e:
+                print(f"DEBUG: Failed to find user by username {username}: {e}")
                 pass
 
-        if not target and user.get('user_id'):
-            try:
-                target = await client.get_entity(int(user['user_id']))
-            except Exception as e:
-                pass
-
+        # Priority 3: Phone (only if ID and Username not found or not provided)
         if not target and user.get('phone'):
             phone_num = user['phone']
             try:
                 target = await client.get_entity(phone_num)
+                print(f"DEBUG: Found user by phone: {phone_num}")
             except Exception as e:
+                print(f"DEBUG: Failed to find user by phone {phone_num}: {e}")
                 pass
 
         if not target:
@@ -152,9 +162,33 @@ def run_campaign_task(campaign_id):
         media_type = settings.get('media_type')
         account_phones = settings.get('accounts', [])
 
+        # Normalize phone numbers for comparison (remove +, spaces, etc.)
+        def normalize_phone(phone):
+            if not phone:
+                return ''
+            return str(phone).replace('+', '').replace(' ', '').replace('-', '').strip()
+
+        normalized_saved_phones = [normalize_phone(p) for p in account_phones]
+        
         # Get accounts
         all_accounts = sheets_manager.get_all_accounts()
-        accounts = [acc for acc in all_accounts if acc.get('phone') in account_phones]
+        accounts = []
+        for acc in all_accounts:
+            acc_phone = normalize_phone(acc.get('phone'))
+            if acc_phone and acc_phone in normalized_saved_phones:
+                accounts.append(acc)
+
+        # Debug logging
+        db.add_campaign_log(
+            campaign_id, 
+            f'Looking for accounts: {account_phones} (normalized: {normalized_saved_phones})', 
+            level='info'
+        )
+        db.add_campaign_log(
+            campaign_id, 
+            f'Found {len(accounts)} accounts out of {len(all_accounts)} total', 
+            level='info'
+        )
 
         # Get users from campaign_users table (new system)
         campaign_users = db.get_campaign_users(campaign_id)
@@ -162,7 +196,11 @@ def run_campaign_task(campaign_id):
         users = [cu for cu in campaign_users if cu.get('status', 'pending') == 'pending']
 
         if not accounts:
-            db.add_campaign_log(campaign_id, 'No accounts available', level='error')
+            db.add_campaign_log(
+                campaign_id, 
+                f'No accounts available. Saved phones: {account_phones}, Available accounts: {[a.get("phone") for a in all_accounts]}', 
+                level='error'
+            )
             db.update_campaign(campaign_id, status='failed')
             return
 
@@ -185,8 +223,9 @@ def run_campaign_task(campaign_id):
             account = accounts[account_idx % len(accounts)]
             account_phone = account.get('phone', 'unknown')
 
-            # Get user identifier
-            user_identifier = user.get('username') or user.get('user_id') or user.get('phone') or 'unknown'
+            # Get user identifier with priority: ID -> Username -> Phone
+            user_identifier = user.get('user_id') or user.get('username') or user.get('phone') or 'unknown'
+            identifier_type = 'ID' if user.get('user_id') else ('Username' if user.get('username') else 'Phone')
 
             # Check rate limit
             if not rate_limiter.can_send(account_phone):
@@ -210,7 +249,7 @@ def run_campaign_task(campaign_id):
 
                     db.add_campaign_log(
                         campaign_id,
-                        f'✓ Sent to {user_identifier} from {account_phone}',
+                        f'✓ Sent to {user_identifier} ({identifier_type}) from {account_phone}',
                         level='success'
                     )
 
@@ -255,7 +294,7 @@ def run_campaign_task(campaign_id):
                     failed_count += 1
                     db.add_campaign_log(
                         campaign_id,
-                        f'✗ Failed to send to {user_identifier} from {account_phone}: {error_msg}',
+                        f'✗ Failed to send to {user_identifier} ({identifier_type}) from {account_phone}: {error_msg}',
                         level='error'
                     )
 
@@ -273,7 +312,7 @@ def run_campaign_task(campaign_id):
                 failed_count += 1
                 db.add_campaign_log(
                     campaign_id,
-                    f'Exception sending to {user_identifier}: {str(e)}',
+                    f'Exception sending to {user_identifier} ({identifier_type}): {str(e)}',
                     level='error'
                 )
 
@@ -466,16 +505,25 @@ def new_campaign():
             users = sheets_manager.users
             return render_template('new_campaign.html', accounts=accounts, users=users)
 
-        # Get selected accounts
-        account_ids = request.form.getlist('accounts')
+        # Get selected accounts (form sends phone numbers, not IDs)
+        account_phones = request.form.getlist('accounts')
+        print(f"DEBUG: Selected account phones from form: {account_phones}")
         
-        # Get account phones from account IDs
+        # Validate that phones exist in available accounts
         all_accounts = sheets_manager.get_all_accounts()
-        account_phones = []
-        for acc_id in account_ids:
-            account = next((acc for acc in all_accounts if acc.get('id') == acc_id), None)
-            if account and account.get('phone'):
-                account_phones.append(account['phone'])
+        print(f"DEBUG: Total accounts available: {len(all_accounts)}")
+        valid_account_phones = []
+        for phone in account_phones:
+            # Check if phone exists in any account
+            account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
+            if account:
+                valid_account_phones.append(phone)
+                print(f"DEBUG: Valid account phone: {phone}")
+            else:
+                print(f"DEBUG: Account with phone {phone} not found!")
+        
+        account_phones = valid_account_phones
+        print(f"DEBUG: Final account phones to save: {account_phones}")
         
         # Get campaign users from JSON (sent by JavaScript)
         campaign_users_json = request.form.get('campaign_users_data', '[]')
@@ -493,6 +541,7 @@ def new_campaign():
         
         print(f"DEBUG Campaign settings: message={bool(message)}, media_path={media_path}, media_type={media_type}")
         print(f"DEBUG Campaign users count: {len(campaign_users)}")
+        print(f"DEBUG Campaign accounts count: {len(account_phones)}")
 
         campaign_id = db.create_campaign(
             user_id=session['user_id'],
@@ -507,21 +556,21 @@ def new_campaign():
             print(f"DEBUG: Added {len(campaign_users)} users to campaign {campaign_id}")
 
         # Assign campaign_id to selected accounts and update their IDs
-        for account_id in account_ids:
-            account = sheets_manager.get_account(account_id)
+        for phone in account_phones:
+            # Find account by phone
+            account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
             if account:
-                phone = account.get('phone', '')
-                if phone:
-                    # Generate new ID: acc_{phone}_{campaign_id}
-                    phone_clean = phone.replace('+', '').replace(' ', '')
-                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
-                    
-                    # Update account with new ID and campaign_id
-                    sheets_manager.update_account(account_id, {
-                        'new_id': new_account_id,
-                        'campaign_id': campaign_id
-                    })
-                    print(f"✓ Assigned campaign {campaign_id} to account {account_id} → {new_account_id}")
+                account_id = account.get('id')
+                # Generate new ID: acc_{phone}_{campaign_id}
+                phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
+                new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                
+                # Update account with new ID and campaign_id
+                sheets_manager.update_account(account_id, {
+                    'new_id': new_account_id,
+                    'campaign_id': campaign_id
+                })
+                print(f"✓ Assigned campaign {campaign_id} to account {account_id} ({phone}) → {new_account_id}")
 
         flash('Campaign created! Starting...', 'success')
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
