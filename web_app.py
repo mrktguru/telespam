@@ -620,10 +620,7 @@ def send_conversation_message(conversation_id):
     if not conversation:
         return jsonify({'error': 'Conversation not found'}), 404
     
-    message_text = request.form.get('message')
-    if not message_text:
-        flash('Message text is required', 'danger')
-        return redirect(url_for('view_conversation', conversation_id=conversation_id))
+    message_text = request.form.get('message', '').strip()
     
     # Handle media upload
     media_path = None
@@ -649,6 +646,11 @@ def send_conversation_message(conversation_id):
                 media_type = 'video'
             elif ext in ['mp3', 'ogg', 'wav', 'm4a']:
                 media_type = 'audio'
+    
+    # Validate: at least text or media must be provided
+    if not message_text and not (media_path and media_type):
+        flash('Please provide either a message or media file', 'warning')
+        return redirect(url_for('view_conversation', conversation_id=conversation_id))
     
     # Get account
     account = sheets_manager.get_account(conversation['sender_account_id'])
@@ -721,8 +723,9 @@ def send_conversation_message(conversation_id):
         loop.close()
         
         if success:
-            # Save message to database
-            db.add_message(conversation_id, 'outgoing', message_text)
+            # Save message to database (use media info if no text)
+            msg_to_save = message_text if message_text else f'[Media: {media_type}]' if media_type else 'Message sent'
+            db.add_message(conversation_id, 'outgoing', msg_to_save)
             flash('Message sent successfully', 'success')
         else:
             flash(f'Failed to send message: {error}', 'danger')
