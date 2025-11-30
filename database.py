@@ -638,14 +638,31 @@ class Database:
         added_count = 0
         try:
             for user_data in users_data:
+                # Process user_id - convert to string if it's a number, or None if empty
+                user_id = user_data.get('user_id')
+                if user_id is not None and user_id != '':
+                    user_id = str(user_id)
+                else:
+                    user_id = None
+                
+                # Process username - None if empty
+                username = user_data.get('username')
+                if username == '':
+                    username = None
+                
+                # Process phone - None if empty
+                phone = user_data.get('phone')
+                if phone == '':
+                    phone = None
+                
                 cursor.execute(
                     '''INSERT INTO campaign_users 
                        (campaign_id, username, user_id, phone, priority) 
                        VALUES (?, ?, ?, ?, ?)''',
                     (campaign_id, 
-                     user_data.get('username'),
-                     user_data.get('user_id'), 
-                     user_data.get('phone'),
+                     username,
+                     user_id, 
+                     phone,
                      user_data.get('priority', 1))
                 )
                 added_count += 1
