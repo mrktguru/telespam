@@ -1181,49 +1181,72 @@ def bulk_delete_users():
 @login_required
 def import_csv_users():
     """Import users from CSV/Excel file"""
+    print("=" * 60)
+    print("CSV IMPORT REQUEST RECEIVED")
+    print("=" * 60)
     try:
+        print(f"Files in request: {list(request.files.keys())}")
         if 'file' not in request.files:
+            print("ERROR: No file in request")
             return jsonify({'success': False, 'error': 'No file provided'})
 
         file = request.files['file']
+        print(f"File received: {file.filename}")
         if file.filename == '':
+            print("ERROR: Empty filename")
             return jsonify({'success': False, 'error': 'No file selected'})
 
         # Check file extension
         filename_lower = file.filename.lower()
+        print(f"File extension check: {filename_lower}")
         if not (filename_lower.endswith('.csv') or filename_lower.endswith('.xlsx') or filename_lower.endswith('.xls')):
+            print(f"ERROR: Invalid extension")
             return jsonify({'success': False, 'error': 'Unsupported file format. Use CSV, XLS, or XLSX.'})
 
         # Import pandas
         try:
             import pandas as pd
-        except ImportError:
+            print(f"✓ Pandas imported successfully (v{pd.__version__})")
+        except ImportError as e:
+            print(f"ERROR: Failed to import pandas: {e}")
             return jsonify({
                 'success': False,
                 'error': 'Required libraries not installed. Please install: pip install pandas openpyxl xlrd'
             })
 
         # Read file based on extension
+        print(f"Attempting to read file...")
         try:
             if filename_lower.endswith('.csv'):
                 # Try different encodings for CSV
                 try:
                     df = pd.read_csv(file, encoding='utf-8')
+                    print(f"✓ CSV read with UTF-8 encoding")
                 except UnicodeDecodeError:
                     file.seek(0)
                     df = pd.read_csv(file, encoding='latin-1')
+                    print(f"✓ CSV read with Latin-1 encoding")
             elif filename_lower.endswith('.xlsx'):
                 df = pd.read_excel(file, engine='openpyxl')
+                print(f"✓ XLSX read with openpyxl")
             elif filename_lower.endswith('.xls'):
                 df = pd.read_excel(file, engine='xlrd')
+                print(f"✓ XLS read with xlrd")
+            print(f"DataFrame shape: {df.shape} (rows: {len(df)}, columns: {len(df.columns)})")
+            print(f"Columns: {list(df.columns)}")
         except Exception as e:
+            print(f"ERROR reading file: {e}")
+            import traceback
+            traceback.print_exc()
             return jsonify({'success': False, 'error': f'Failed to read file: {str(e)}'})
 
         # Validate that file has data
         if df.empty:
+            print("ERROR: DataFrame is empty")
             return jsonify({'success': False, 'error': 'File is empty'})
 
         # Expected columns: username, user_id, phone, priority (all optional)
+        print(f"Processing {len(df)} rows...")
         count = 0
         skipped = 0
 
@@ -1264,6 +1287,9 @@ def import_csv_users():
             sheets_manager.add_user(user_data)
             count += 1
 
+        print(f"✓ Import complete: {count} users imported, {skipped} skipped")
+        print("=" * 60)
+
         result = {'success': True, 'count': count}
         if skipped > 0:
             result['skipped'] = skipped
@@ -1271,8 +1297,10 @@ def import_csv_users():
         return jsonify(result)
 
     except Exception as e:
+        print(f"EXCEPTION in import_csv_users: {e}")
         import traceback
         traceback.print_exc()
+        print("=" * 60)
         return jsonify({'success': False, 'error': f'Unexpected error: {str(e)}'})
 
 
