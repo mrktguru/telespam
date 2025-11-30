@@ -10,7 +10,7 @@
     </a>
 </div>
 <div class="alert alert-warning mb-3" role="alert">
-    <strong>🚀 Version 2.0 - Build 20241130_141841</strong><br>
+    <strong>🚀 Version 2.0 - Build 20241130_142500</strong><br>
     <small>✅ If you see this yellow box, the page has been updated!<br>
     📋 Check browser console (F12) for detailed import logs.</small>
 </div>
@@ -816,6 +816,102 @@ function handleFileImport(event) {
 // Make the function globally available for onclick handlers
 console.log("handleFileImport function defined and assigned to window");
 window.handleFileImport = handleFileImport;
+
+// Enhanced event binding with debugging
+// Add debugging and multiple binding methods
+
+// Method 1: Direct inline onclick replacement
+function setupFileImportHandler() {
+    console.log("🔧 Setting up file import handler...");
+    
+    const csvUpload = document.getElementById("csvUpload");
+    const importButton = document.querySelector('button[onclick*="csvUpload"]');
+    
+    if (csvUpload) {
+        console.log("✅ CSV upload element found:", csvUpload);
+        
+        // Remove any existing handlers
+        csvUpload.onchange = null;
+        
+        // Add new handler
+        csvUpload.onchange = function(event) {
+            console.log("📂 File input onchange triggered!");
+            handleFileImport(event);
+        };
+        
+        // Also add addEventListener for redundancy
+        csvUpload.addEventListener("change", function(event) {
+            console.log("📂 File input addEventListener triggered!");
+            handleFileImport(event);
+        }, false);
+        
+        console.log("✅ File handlers attached via onchange and addEventListener");
+    } else {
+        console.error("❌ CSV upload element NOT found!");
+    }
+    
+    // Method 2: Replace button onclick to add debugging
+    if (importButton) {
+        console.log("✅ Import button found:", importButton);
+        importButton.onclick = function() {
+            console.log("🔘 Import button clicked!");
+            const csvUpload = document.getElementById('csvUpload');
+            if (csvUpload) {
+                console.log("📋 Triggering file dialog...");
+                csvUpload.click();
+            } else {
+                console.error("❌ CSV upload element not found when button clicked!");
+            }
+        };
+        console.log("✅ Button onclick replaced with debug version");
+    } else {
+        console.error("❌ Import button NOT found!");
+    }
+}
+
+// Try to bind at multiple points
+console.log("⏰ Setting up multiple binding attempts...");
+
+// Attempt 1: Immediate execution
+try {
+    setupFileImportHandler();
+    console.log("✅ Immediate binding attempt completed");
+} catch (error) {
+    console.error("❌ Immediate binding failed:", error);
+}
+
+// Attempt 2: DOMContentLoaded
+document.addEventListener("DOMContentLoaded", function() {
+    console.log("📄 DOMContentLoaded fired!");
+    setupFileImportHandler();
+});
+
+// Attempt 3: Window onload
+window.addEventListener("load", function() {
+    console.log("🪟 Window onload fired!");
+    setupFileImportHandler();
+});
+
+// Attempt 4: Delayed execution
+setTimeout(function() {
+    console.log("⏱️ Delayed binding (1 second)...");
+    setupFileImportHandler();
+}, 1000);
+
+// Also expose globally for manual testing
+window.setupFileImportHandler = setupFileImportHandler;
+window.testFileImport = function() {
+    console.log("🧪 Manual test triggered");
+    const testFile = new File(["test,data"], "test.csv", {type: "text/csv"});
+    const event = {
+        target: {
+            files: [testFile]
+        }
+    };
+    handleFileImport(event);
+};
+
+console.log("📌 Debug functions available: setupFileImportHandler(), testFileImport()");
 
 
 
