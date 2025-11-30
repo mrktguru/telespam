@@ -661,7 +661,6 @@ def send_conversation_message(conversation_id):
     # Send message via Telegram
     try:
         import asyncio
-        from pathlib import Path
         
         phone = account.get('phone')
         session_file = Path(__file__).parent / 'sessions' / f'{phone.replace("+", "")}.session'
