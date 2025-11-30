@@ -319,6 +319,7 @@ updateCounts();
 // CSV Import
 function handleCSVUpload(event) {
     const file = event.target.files[0];
+    console.log("Selected file:", file);
     if (!file) return;
     
     const status = document.getElementById('importStatus');
@@ -391,6 +392,7 @@ function insertEmoji(emoji) {
 // Media Preview
 function previewMedia(event) {
     const file = event.target.files[0];
+    console.log("Selected file:", file);
     if (file) {
         document.getElementById('mediaFileName').textContent = file.name;
         document.getElementById('mediaPreview').style.display = 'block';
@@ -426,6 +428,7 @@ function updateUserCount() {
 }
 
 function addCampaignUser(username, user_id, phone, priority = 1) {
+    console.log("Adding campaign user:", {username, user_id, phone, priority});
     const user = {
         id: Date.now(), // temporary ID
         username: username,
@@ -504,7 +507,9 @@ function toggleAllCampaignUsers(checkbox) {
 }
 
 function handleCampaignCSVUpload(event) {
+    console.log("CSV upload function called", event);
     const file = event.target.files[0];
+    console.log("Selected file:", file);
     if (!file) return;
     
     const status = document.getElementById('importStatus');
@@ -551,7 +556,13 @@ function handleCampaignCSVUpload(event) {
         }
     };
     
+    reader.onerror = function(error) {
+        console.error("FileReader error:", error);
+        status.className = "alert alert-danger m-3";
+        status.innerHTML = `<i class="bi bi-x-circle"></i> Error reading file: ${error}`;
+    };
     reader.readAsText(file);
+    console.log("FileReader started");
 }
 
 function submitAddUser() {
