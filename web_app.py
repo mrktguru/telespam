@@ -453,7 +453,7 @@ def new_campaign():
                 print(f"DEBUG Campaign: media_type={media_type}")
         
         # Validate: at least text or media must be provided
-        if not message and not (media_path and media_type):
+        if not message and not media_path:
             flash('Please provide either a message or media file', 'warning')
             # Get accounts and users for form
             accounts = sheets_manager.get_all_accounts()
@@ -662,7 +662,7 @@ def send_conversation_message(conversation_id):
                 media_type = 'audio'
     
     # Validate: at least text or media must be provided
-    if not message_text and not (media_path and media_type):
+    if not message_text and not media_path:
         flash('Please provide either a message or media file', 'warning')
         return redirect(url_for('view_conversation', conversation_id=conversation_id))
     
