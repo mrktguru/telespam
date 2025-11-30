@@ -904,9 +904,10 @@ def fetch_conversation_messages(conversation_id):
                 messages = []
                 async for message in client.iter_messages(user_id, limit=100):
                     messages.append({
-                        'text': message.text,
+                        'id': message.id,  # Telegram message ID for duplicate detection
+                        'text': message.text or '',
                         'is_out': message.out,  # True if sent by us, False if received
-                        'date': message.date.isoformat()
+                        'date': message.date.isoformat() if message.date else None
                     })
                 
                 return list(reversed(messages)), None
@@ -927,22 +928,35 @@ def fetch_conversation_messages(conversation_id):
         if error:
             return jsonify({'error': error}), 400
         
-        # Get already saved messages to avoid duplicates (text + date combination)
+        # Get already saved messages to avoid duplicates
+        # We'll use a combination of text and date to identify duplicates
         saved_msgs = db.get_conversation_messages(conversation_id)
-        saved_set = {(msg['message_text'], msg['sent_at'][:19]) for msg in saved_msgs if msg.get('message_text')}
+        # Create set of (text, date) pairs from saved messages
+        # Normalize dates to first 19 chars (YYYY-MM-DDTHH:MM:SS) for comparison
+        saved_set = set()
+        for saved_msg in saved_msgs:
+            if saved_msg.get('message_text') and saved_msg.get('sent_at'):
+                text = saved_msg['message_text'].strip()
+                date = saved_msg['sent_at'][:19]  # First 19 chars: YYYY-MM-DDTHH:MM:SS
+                saved_set.add((text, date))
         
         # Save new messages
         new_count = 0
         for msg in messages:
-            if msg['text']:
-                # Create unique key from text and date
-                msg_key = (msg['text'], msg['date'][:19])
+            text = msg.get('text', '').strip()
+            if text:  # Only process messages with text
+                # Normalize date to first 19 chars for comparison
+                msg_date = msg.get('date', '')[:19] if msg.get('date') else None
+                msg_key = (text, msg_date)
                 
                 # Only add if not already in database
                 if msg_key not in saved_set:
-                    direction = 'outgoing' if msg['is_out'] else 'incoming'
-                    db.add_message(conversation_id, direction, msg['text'])
+                    direction = 'outgoing' if msg.get('is_out') else 'incoming'
+                    # Pass original message date from Telegram to preserve it
+                    db.add_message(conversation_id, direction, text, message_date=msg.get('date'))
                     new_count += 1
+                    # Add to saved_set to avoid duplicates in the same batch
+                    saved_set.add(msg_key)
         
         return jsonify({'success': True, 'new_messages': new_count, 'total': len(messages)})
         
@@ -1110,11 +1124,28 @@ def edit_account(account_id):
             success, result = asyncio.run(update_profile())
             
             if success:
-                # Update local storage
-                sheets_manager.update_account(account_id, {
-                    'first_name': result['first_name'],
-                    'last_name': result['last_name']
-                })
+                # Update local storage with all updated fields
+                update_data = {
+                    'first_name': result.get('first_name', ''),
+                    'last_name': result.get('last_name', ''),
+                }
+                
+                # Add bio if available
+                if 'bio' in result:
+                    update_data['bio'] = result['bio']
+                elif 'about' in result:
+                    update_data['bio'] = result['about']
+                
+                # Add username if available
+                if 'username' in result:
+                    update_data['username'] = result.get('username', '')
+                
+                # Add photo count if available
+                if 'photo_count' in result:
+                    update_data['photo_count'] = result.get('photo_count', 0)
+                
+                print(f"DEBUG: Updating account with data: {update_data}")
+                sheets_manager.update_account(account_id, update_data)
                 
                 flash('Profile updated successfully!', 'success')
             else:

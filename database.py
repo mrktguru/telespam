@@ -354,19 +354,42 @@ class Database:
 
         conn.close()
 
-    def delete_campaign(self, campaign_id: int):
-        """Delete campaign"""
+    def delete_campaign(self, campaign_id: int) -> bool:
+        """Delete campaign and all related data"""
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        # Delete logs
-        cursor.execute('DELETE FROM campaign_logs WHERE campaign_id = ?', (campaign_id,))
+        try:
+            # Delete related data first (CASCADE should handle this, but we do it explicitly)
+            # Delete campaign users
+            cursor.execute('DELETE FROM campaign_users WHERE campaign_id = ?', (campaign_id,))
+            
+            # Delete campaign conversations and their messages
+            # First get conversation IDs
+            cursor.execute('SELECT id FROM campaign_conversations WHERE campaign_id = ?', (campaign_id,))
+            conversation_ids = [row[0] for row in cursor.fetchall()]
+            
+            # Delete messages for these conversations
+            for conv_id in conversation_ids:
+                cursor.execute('DELETE FROM campaign_messages WHERE conversation_id = ?', (conv_id,))
+            
+            # Delete conversations
+            cursor.execute('DELETE FROM campaign_conversations WHERE campaign_id = ?', (campaign_id,))
+            
+            # Delete logs
+            cursor.execute('DELETE FROM campaign_logs WHERE campaign_id = ?', (campaign_id,))
 
-        # Delete campaign
-        cursor.execute('DELETE FROM campaigns WHERE id = ?', (campaign_id,))
+            # Delete campaign
+            cursor.execute('DELETE FROM campaigns WHERE id = ?', (campaign_id,))
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error deleting campaign: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
 
     # ========================================================================
     # CAMPAIGN LOGS
@@ -464,17 +487,27 @@ class Database:
         finally:
             conn.close()
 
-    def add_message(self, conversation_id: int, direction: str, message_text: str) -> bool:
-        """Add message to conversation (direction: 'outgoing' or 'incoming')"""
+    def add_message(self, conversation_id: int, direction: str, message_text: str, message_date: str = None) -> bool:
+        """Add message to conversation (direction: 'outgoing' or 'incoming')
+        
+        Args:
+            conversation_id: Conversation ID
+            direction: 'outgoing' or 'incoming'
+            message_text: Message text
+            message_date: Optional message date from Telegram (ISO format). If not provided, uses current time.
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
 
         try:
+            # Use provided message date (from Telegram) or current time
+            sent_at = message_date if message_date else datetime.now().isoformat()
+            
             cursor.execute(
                 '''INSERT INTO campaign_messages 
                 (conversation_id, direction, message_text, sent_at)
                 VALUES (?, ?, ?, ?)''',
-                (conversation_id, direction, message_text, datetime.now().isoformat())
+                (conversation_id, direction, message_text, sent_at)
             )
 
             # Update last_message_at in conversation
