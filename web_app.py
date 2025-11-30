@@ -615,47 +615,73 @@ def view_conversation(conversation_id):
 @login_required
 def send_conversation_message(conversation_id):
     """Send a new message in the conversation with optional media"""
-    conversation = db.get_conversation(conversation_id)
-    
-    if not conversation:
-        return jsonify({'error': 'Conversation not found'}), 404
-    
-    message_text = request.form.get('message', '').strip()
-    
-    # Handle media upload
-    media_path = None
-    media_type = None
-    if 'media' in request.files:
-        media_file = request.files['media']
-        if media_file and media_file.filename:
-            # Create uploads directory
-            upload_dir = Path(__file__).parent / 'uploads' / 'conversations'
-            upload_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        print(f"DEBUG: send_conversation_message called for conversation_id={conversation_id}")
+        
+        conversation = db.get_conversation(conversation_id)
+        
+        if not conversation:
+            print(f"DEBUG: Conversation {conversation_id} not found")
+            flash('Conversation not found', 'danger')
+            return redirect(url_for('campaigns'))
+        
+        print(f"DEBUG: Conversation found: {conversation}")
+        
+        message_text = request.form.get('message', '').strip()
+        print(f"DEBUG: message_text='{message_text}'")
+        
+        # Handle media upload
+        media_path = None
+        media_type = None
+        if 'media' in request.files:
+            media_file = request.files['media']
+            print(f"DEBUG: media file: filename={media_file.filename if media_file else None}")
             
-            # Save file with unique name
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"{timestamp}_{media_file.filename}"
-            media_path = str(upload_dir / filename)
-            media_file.save(media_path)
-            
-            # Determine media type
-            ext = media_file.filename.lower().rsplit('.', 1)[-1]
-            if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
-                media_type = 'photo'
-            elif ext in ['mp4', 'avi', 'mov', 'mkv']:
-                media_type = 'video'
-            elif ext in ['mp3', 'ogg', 'wav', 'm4a']:
-                media_type = 'audio'
-    
-    # Validate: at least text or media must be provided
-    if not message_text and not (media_path and media_type):
-        flash('Please provide either a message or media file', 'warning')
-        return redirect(url_for('view_conversation', conversation_id=conversation_id))
-    
-    # Get account
-    account = sheets_manager.get_account(conversation['sender_account_id'])
-    if not account:
-        flash('Sender account not found', 'danger')
+            if media_file and media_file.filename:
+                # Create uploads directory
+                upload_dir = Path(__file__).parent / 'uploads' / 'conversations'
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Save file with unique name
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"{timestamp}_{media_file.filename}"
+                media_path = str(upload_dir / filename)
+                media_file.save(media_path)
+                
+                print(f"DEBUG: Saved media to: {media_path}")
+                
+                # Determine media type
+                ext = media_file.filename.lower().rsplit('.', 1)[-1]
+                if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
+                    media_type = 'photo'
+                elif ext in ['mp4', 'avi', 'mov', 'mkv']:
+                    media_type = 'video'
+                elif ext in ['mp3', 'ogg', 'wav', 'm4a']:
+                    media_type = 'audio'
+                
+                print(f"DEBUG: media_type={media_type}")
+        
+        # Validate: at least text or media must be provided
+        if not message_text and not (media_path and media_type):
+            print("DEBUG: No text or media provided")
+            flash('Please provide either a message or media file', 'warning')
+            return redirect(url_for('view_conversation', conversation_id=conversation_id))
+        
+        # Get account
+        print(f"DEBUG: Getting account: {conversation['sender_account_id']}")
+        account = sheets_manager.get_account(conversation['sender_account_id'])
+        if not account:
+            print(f"DEBUG: Account not found: {conversation['sender_account_id']}")
+            flash('Sender account not found', 'danger')
+            return redirect(url_for('view_conversation', conversation_id=conversation_id))
+        
+        print(f"DEBUG: Account found: {account.get('phone')}")
+        
+    except Exception as e:
+        print(f"ERROR in send_conversation_message (pre-send): {str(e)}")
+        import traceback
+        traceback.print_exc()
+        flash(f'Error: {str(e)}', 'danger')
         return redirect(url_for('view_conversation', conversation_id=conversation_id))
     
     # Send message via Telegram
