@@ -158,6 +158,24 @@
                         <i class="bi bi-people fs-3 d-block mb-2"></i>
                         <p class="mb-0">No users added to this campaign yet.</p>
                         <small>Import users via CSV/Excel or add manually.</small>
+                        <div class="mt-2">
+                            <details>
+                                <summary class="text-primary" style="cursor: pointer;">CSV Format Help</summary>
+                                <div class="mt-2 p-2 bg-light rounded">
+                                    <strong>Required CSV Format:</strong>
+                                    <pre class="mt-1 mb-1">User name,User ID,Phone number
+john_doe,123456789,+1234567890
+@jane_smith,987654321,+9876543210
+mike_wilson,555444333,+5554443333</pre>
+                                    <small class="text-muted">
+                                        • Column 1: User name (Telegram username, @ optional)
+                                        <br>• Column 2: User ID (numeric Telegram ID)
+                                        <br>• Column 3: Phone number (with + prefix)
+                                        <br>• At least one field (User name, User ID, or Phone) required
+                                    </small>
+                                </div>
+                            </details>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -501,19 +519,21 @@ function handleCampaignCSVUpload(event) {
             const lines = e.target.result.split('\n');
             let imported = 0;
             
-            // Skip header line
+            // Skip header line (expecting: User name, User ID, Phone number)
             for (let i = 1; i < lines.length; i++) {
                 const line = lines[i].trim();
                 if (!line) continue;
                 
                 const columns = line.split(',');
-                const username = columns[0]?.trim();
-                const user_id = columns[1]?.trim();
-                const phone = columns[2]?.trim();
-                const priority = parseInt(columns[3]?.trim()) || 1;
+                const username = columns[0]?.trim(); // User name
+                const user_id = columns[1]?.trim(); // User ID
+                const phone = columns[2]?.trim(); // Phone number
                 
-                if (username || user_id || phone) {
-                    addCampaignUser(username, user_id, phone, priority);
+                // Clean username (remove @ if present)
+                const cleanUsername = username ? username.replace('@', '').replace(/^@/, '') : '';
+                
+                if (cleanUsername || user_id || phone) {
+                    addCampaignUser(cleanUsername, user_id, phone, 1);
                     imported++;
                 }
             }
