@@ -460,26 +460,37 @@ def new_campaign():
             users = sheets_manager.users
             return render_template('new_campaign.html', accounts=accounts, users=users)
 
-        # Get selected accounts and users
+        # Get selected accounts
         account_ids = request.form.getlist('accounts')
-        user_ids = request.form.getlist('users')
+        
+        # Get campaign users from JSON (sent by JavaScript)
+        campaign_users_json = request.form.get('campaign_users_data', '[]')
+        try:
+            campaign_users = json.loads(campaign_users_json)
+        except:
+            campaign_users = []
 
         settings = {
             'message': message if message else None,
             'media_path': media_path,
             'media_type': media_type,
-            'accounts': account_ids,
-            'users': user_ids
+            'accounts': account_ids
         }
         
         print(f"DEBUG Campaign settings: message={bool(message)}, media_path={media_path}, media_type={media_type}")
+        print(f"DEBUG Campaign users count: {len(campaign_users)}")
 
         campaign_id = db.create_campaign(
             user_id=session['user_id'],
             name=name,
-            total_users=len(user_ids),
+            total_users=len(campaign_users),
             settings=settings
         )
+        
+        # Add campaign users to database
+        if campaign_users:
+            db.bulk_add_campaign_users(campaign_id, campaign_users)
+            print(f"DEBUG: Added {len(campaign_users)} users to campaign {campaign_id}")
 
         # Assign campaign_id to selected accounts and update their IDs
         for account_id in account_ids:
@@ -1094,14 +1105,15 @@ def delete_account_photos(account_id):
 @login_required
 def users_list():
     """List all users for outreach"""
-    users = sheets_manager.users
+    # Get campaign-specific users from database
+    campaign_users = db.get_all_campaign_users()
     
     # Get all campaigns for filter dropdown
     user_id = session['user_id']
     campaigns_list = db.get_user_campaigns(user_id, limit=100)
     campaigns = [(c['id'], c['name']) for c in campaigns_list]
 
-    return render_template('users.html', users=users, campaigns=campaigns)
+    return render_template('users.html', users=campaign_users, campaigns=campaigns)
 
 
 @app.route('/users/add', methods=['POST'])

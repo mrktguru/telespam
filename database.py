@@ -104,6 +104,23 @@ class Database:
             )
         ''')
 
+        # Campaign users table - links users to specific campaigns
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS campaign_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                username TEXT,
+                user_id TEXT,
+                phone TEXT,
+                priority INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'pending',
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                contacted_at TIMESTAMP,
+                contacted_by TEXT,
+                FOREIGN KEY (campaign_id) REFERENCES campaigns (id) ON DELETE CASCADE
+            )
+        ''')
+
         conn.commit()
         conn.close()
 
@@ -550,6 +567,145 @@ class Database:
         except Exception as e:
             print(f"Error deleting conversation: {e}")
             return False
+        finally:
+            conn.close()
+
+    # ========================================================================
+    # CAMPAIGN USERS
+    # ========================================================================
+
+    def add_campaign_user(self, campaign_id: int, username: str = None, user_id: str = None, 
+                         phone: str = None, priority: int = 1) -> Optional[int]:
+        """Add user to specific campaign"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute(
+                '''INSERT INTO campaign_users 
+                   (campaign_id, username, user_id, phone, priority) 
+                   VALUES (?, ?, ?, ?, ?)''',
+                (campaign_id, username, user_id, phone, priority)
+            )
+            conn.commit()
+            user_record_id = cursor.lastrowid
+            return user_record_id
+        except Exception as e:
+            print(f"Error adding campaign user: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_campaign_users(self, campaign_id: int) -> List[Dict]:
+        """Get all users for specific campaign"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            '''SELECT * FROM campaign_users 
+               WHERE campaign_id = ? 
+               ORDER BY priority DESC, added_at ASC''',
+            (campaign_id,)
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+
+    def get_all_campaign_users(self) -> List[Dict]:
+        """Get all users with campaign information for Users for Outreach"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            '''SELECT cu.*, c.name as campaign_name 
+               FROM campaign_users cu
+               LEFT JOIN campaigns c ON cu.campaign_id = c.id
+               ORDER BY cu.added_at DESC'''
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+
+    def bulk_add_campaign_users(self, campaign_id: int, users_data: List[Dict]) -> int:
+        """Bulk add users to campaign from CSV/Excel import"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        added_count = 0
+        try:
+            for user_data in users_data:
+                cursor.execute(
+                    '''INSERT INTO campaign_users 
+                       (campaign_id, username, user_id, phone, priority) 
+                       VALUES (?, ?, ?, ?, ?)''',
+                    (campaign_id, 
+                     user_data.get('username'),
+                     user_data.get('user_id'), 
+                     user_data.get('phone'),
+                     user_data.get('priority', 1))
+                )
+                added_count += 1
+            
+            conn.commit()
+            return added_count
+        except Exception as e:
+            print(f"Error bulk adding campaign users: {e}")
+            conn.rollback()
+            return 0
+        finally:
+            conn.close()
+
+    def delete_campaign_users(self, campaign_id: int, user_ids: List[int]) -> int:
+        """Delete selected users from campaign"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        deleted_count = 0
+        try:
+            for user_id in user_ids:
+                cursor.execute(
+                    'DELETE FROM campaign_users WHERE campaign_id = ? AND id = ?',
+                    (campaign_id, user_id)
+                )
+                deleted_count += cursor.rowcount
+            
+            conn.commit()
+            return deleted_count
+        except Exception as e:
+            print(f"Error deleting campaign users: {e}")
+            conn.rollback()
+            return 0
+        finally:
+            conn.close()
+
+    def update_campaign_user_status(self, user_id: int, campaign_id: int, status: str, contacted_by: str = None):
+        """Update campaign user status when contacted"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            if status == 'contacted':
+                cursor.execute(
+                    '''UPDATE campaign_users 
+                       SET status = ?, contacted_at = CURRENT_TIMESTAMP, contacted_by = ?
+                       WHERE id = ? AND campaign_id = ?''',
+                    (status, contacted_by, user_id, campaign_id)
+                )
+            else:
+                cursor.execute(
+                    '''UPDATE campaign_users 
+                       SET status = ?
+                       WHERE id = ? AND campaign_id = ?''',
+                    (status, user_id, campaign_id)
+                )
+            
+            conn.commit()
+        except Exception as e:
+            print(f"Error updating campaign user status: {e}")
         finally:
             conn.close()
 
