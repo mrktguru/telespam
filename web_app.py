@@ -421,7 +421,7 @@ def new_campaign():
     """Create new campaign"""
     if request.method == 'POST':
         name = request.form.get('name')
-        message = request.form.get('message')
+        message = request.form.get('message', '').strip()
 
         # Handle media upload
         media_path = None
@@ -439,6 +439,8 @@ def new_campaign():
                 media_path = str(upload_dir / filename)
                 media_file.save(media_path)
                 
+                print(f"DEBUG Campaign: Saved media to {media_path}, size: {Path(media_path).stat().st_size} bytes")
+                
                 # Determine media type
                 ext = media_file.filename.lower().rsplit('.', 1)[-1]
                 if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
@@ -447,18 +449,30 @@ def new_campaign():
                     media_type = 'video'
                 elif ext in ['mp3', 'ogg', 'wav', 'm4a']:
                     media_type = 'audio'
+                
+                print(f"DEBUG Campaign: media_type={media_type}")
+        
+        # Validate: at least text or media must be provided
+        if not message and not (media_path and media_type):
+            flash('Please provide either a message or media file', 'warning')
+            # Get accounts and users for form
+            accounts = sheets_manager.get_all_accounts()
+            users = sheets_manager.users
+            return render_template('new_campaign.html', accounts=accounts, users=users)
 
         # Get selected accounts and users
         account_ids = request.form.getlist('accounts')
         user_ids = request.form.getlist('users')
 
         settings = {
-            'message': message,
+            'message': message if message else None,
             'media_path': media_path,
             'media_type': media_type,
             'accounts': account_ids,
             'users': user_ids
         }
+        
+        print(f"DEBUG Campaign settings: message={bool(message)}, media_path={media_path}, media_type={media_type}")
 
         campaign_id = db.create_campaign(
             user_id=session['user_id'],
