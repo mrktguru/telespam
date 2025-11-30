@@ -1181,65 +1181,127 @@ def bulk_delete_users():
 @login_required
 def import_csv_users():
     """Import users from CSV/Excel file"""
+    print("=" * 60)
+    print("CSV IMPORT REQUEST RECEIVED")
+    print("=" * 60)
     try:
+        print(f"Files in request: {list(request.files.keys())}")
         if 'file' not in request.files:
+            print("ERROR: No file in request")
             return jsonify({'success': False, 'error': 'No file provided'})
-        
+
         file = request.files['file']
+        print(f"File received: {file.filename}")
         if file.filename == '':
+            print("ERROR: Empty filename")
             return jsonify({'success': False, 'error': 'No file selected'})
-        
+
+        # Check file extension
+        filename_lower = file.filename.lower()
+        print(f"File extension check: {filename_lower}")
+        if not (filename_lower.endswith('.csv') or filename_lower.endswith('.xlsx') or filename_lower.endswith('.xls')):
+            print(f"ERROR: Invalid extension")
+            return jsonify({'success': False, 'error': 'Unsupported file format. Use CSV, XLS, or XLSX.'})
+
+        # Import pandas
+        try:
+            import pandas as pd
+            print(f"✓ Pandas imported successfully (v{pd.__version__})")
+        except ImportError as e:
+            print(f"ERROR: Failed to import pandas: {e}")
+            return jsonify({
+                'success': False,
+                'error': 'Required libraries not installed. Please install: pip install pandas openpyxl xlrd'
+            })
+
         # Read file based on extension
-        import pandas as pd
-        
-        if file.filename.endswith('.csv'):
-            df = pd.read_csv(file)
-        elif file.filename.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(file)
-        else:
-            return jsonify({'success': False, 'error': 'Unsupported file format. Use CSV or Excel.'})
-        
+        print(f"Attempting to read file...")
+        try:
+            if filename_lower.endswith('.csv'):
+                # Try different encodings for CSV
+                try:
+                    df = pd.read_csv(file, encoding='utf-8')
+                    print(f"✓ CSV read with UTF-8 encoding")
+                except UnicodeDecodeError:
+                    file.seek(0)
+                    df = pd.read_csv(file, encoding='latin-1')
+                    print(f"✓ CSV read with Latin-1 encoding")
+            elif filename_lower.endswith('.xlsx'):
+                df = pd.read_excel(file, engine='openpyxl')
+                print(f"✓ XLSX read with openpyxl")
+            elif filename_lower.endswith('.xls'):
+                df = pd.read_excel(file, engine='xlrd')
+                print(f"✓ XLS read with xlrd")
+            print(f"DataFrame shape: {df.shape} (rows: {len(df)}, columns: {len(df.columns)})")
+            print(f"Columns: {list(df.columns)}")
+        except Exception as e:
+            print(f"ERROR reading file: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'error': f'Failed to read file: {str(e)}'})
+
+        # Validate that file has data
+        if df.empty:
+            print("ERROR: DataFrame is empty")
+            return jsonify({'success': False, 'error': 'File is empty'})
+
         # Expected columns: username, user_id, phone, priority (all optional)
+        print(f"Processing {len(df)} rows...")
         count = 0
-        for _, row in df.iterrows():
+        skipped = 0
+
+        for idx, row in df.iterrows():
             user_data = {}
-            
+
             if 'username' in df.columns and pd.notna(row['username']):
                 user_data['username'] = str(row['username']).strip().lstrip('@')
-            
+
             if 'user_id' in df.columns and pd.notna(row['user_id']):
                 try:
-                    user_data['user_id'] = int(row['user_id'])
-                except:
+                    user_data['user_id'] = int(float(row['user_id']))
+                except (ValueError, TypeError):
+                    skipped += 1
                     continue
-            
+
             if 'phone' in df.columns and pd.notna(row['phone']):
-                user_data['phone'] = str(row['phone']).strip()
-            
+                phone_str = str(row['phone']).strip()
+                # Handle phone numbers that might be parsed as floats
+                if '.' in phone_str:
+                    phone_str = phone_str.split('.')[0]
+                user_data['phone'] = phone_str
+
             if 'priority' in df.columns and pd.notna(row['priority']):
                 try:
-                    user_data['priority'] = int(row['priority'])
-                except:
+                    user_data['priority'] = int(float(row['priority']))
+                except (ValueError, TypeError):
                     user_data['priority'] = 1
             else:
                 user_data['priority'] = 1
-            
+
             # Skip if no identifiers
             if not user_data.get('username') and not user_data.get('user_id') and not user_data.get('phone'):
+                skipped += 1
                 continue
-            
+
             user_data['status'] = 'pending'
             sheets_manager.add_user(user_data)
             count += 1
-        
-        return jsonify({'success': True, 'count': count})
-        
-    except ImportError:
-        return jsonify({'success': False, 'error': 'pandas library not installed. Install with: pip install pandas openpyxl'})
+
+        print(f"✓ Import complete: {count} users imported, {skipped} skipped")
+        print("=" * 60)
+
+        result = {'success': True, 'count': count}
+        if skipped > 0:
+            result['skipped'] = skipped
+
+        return jsonify(result)
+
     except Exception as e:
+        print(f"EXCEPTION in import_csv_users: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)})
+        print("=" * 60)
+        return jsonify({'success': False, 'error': f'Unexpected error: {str(e)}'})
 
 
 # ============================================================================
