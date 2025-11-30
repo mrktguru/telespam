@@ -292,27 +292,34 @@ mike_wilson,555444333,+5554443333</pre>
 
 {% block extra_js %}
 <script>
+console.log("Campaign JavaScript loaded");
 function updateCounts() {
     const accountCount = document.querySelectorAll('.account-checkbox:checked').length;
     const userCount = document.querySelectorAll('.user-checkbox:checked').length;
 
     document.getElementById('accountCount').textContent = accountCount;
     document.getElementById('userCount').textContent = userCount;
+
 }
+
 
 function selectAllAccounts() {
     const checkboxes = document.querySelectorAll('.account-checkbox');
     const allChecked = Array.from(checkboxes).every(cb => cb.checked);
     checkboxes.forEach(cb => cb.checked = !allChecked);
     updateCounts();
+
 }
+
 
 function selectAllUsers() {
     const checkboxes = document.querySelectorAll('.user-checkbox');
     const allChecked = Array.from(checkboxes).every(cb => cb.checked);
     checkboxes.forEach(cb => cb.checked = !allChecked);
     updateCounts();
+
 }
+
 
 document.querySelectorAll('.account-checkbox, .user-checkbox').forEach(cb => {
     cb.addEventListener('change', updateCounts);
@@ -404,7 +411,9 @@ function insertFormat(tag) {
     const cursorPos = start + tag.length + 2 + (selectedText ? selectedText.length : 0);
     textarea.setSelectionRange(cursorPos, cursorPos);
     textarea.focus();
+
 }
+
 
 function insertEmoji(emoji) {
     const textarea = document.getElementById('message');
@@ -416,7 +425,9 @@ function insertEmoji(emoji) {
     const cursorPos = start + emoji.length;
     textarea.setSelectionRange(cursorPos, cursorPos);
     textarea.focus();
+
 }
+
 
 // Media Preview
 function previewMedia(event) {
@@ -426,12 +437,16 @@ function previewMedia(event) {
         document.getElementById('mediaFileName').textContent = file.name;
         document.getElementById('mediaPreview').style.display = 'block';
     }
+
 }
+
 
 function clearMedia() {
     document.getElementById('mediaFile').value = '';
     document.getElementById('mediaPreview').style.display = 'none';
+
 }
+
 
 // ========================================================================
 // CAMPAIGN USERS MANAGEMENT
@@ -454,7 +469,9 @@ function updateUserCount() {
         table.style.display = 'none';
         message.style.display = 'block';
     }
+
 }
+
 
 function addCampaignUser(username, user_id, phone, priority = 1) {
     console.log("Adding campaign user:", {username, user_id, phone, priority});
@@ -469,13 +486,17 @@ function addCampaignUser(username, user_id, phone, priority = 1) {
     campaignUsers.push(user);
     renderCampaignUsers();
     updateUserCount();
+
 }
+
 
 function removeCampaignUser(tempId) {
     campaignUsers = campaignUsers.filter(user => user.id !== tempId);
     renderCampaignUsers();
     updateUserCount();
+
 }
+
 
 function renderCampaignUsers() {
     const tbody = document.getElementById('campaignUsersBody');
@@ -501,7 +522,9 @@ function renderCampaignUsers() {
         `;
         tbody.appendChild(row);
     });
+
 }
+
 
 function filterCampaignUsers() {
     const usernameFilter = document.getElementById('filterUsername').value.toLowerCase();
@@ -521,19 +544,25 @@ function filterCampaignUsers() {
         
         row.style.display = matchUsername && matchUserId && matchPriority ? '' : 'none';
     });
+
 }
+
 
 function clearCampaignFilters() {
     document.getElementById('filterUsername').value = '';
     document.getElementById('filterUserId').value = '';
     document.getElementById('filterPriority').value = '';
     filterCampaignUsers();
+
 }
+
 
 function toggleAllCampaignUsers(checkbox) {
     const checkboxes = document.querySelectorAll('.user-checkbox');
     checkboxes.forEach(cb => cb.checked = checkbox.checked);
+
 }
+
 
 function handleFileImport(event) {
     console.log("File upload function called", event);
@@ -664,7 +693,13 @@ function handleFileImport(event) {
         console.log("FileReader started for CSV");
         reader.readAsText(file);
     }
+
 }
+
+// Make the function globally available for onclick handlers
+window.handleFileImport = handleFileImport;
+
+
 
 function submitAddUser() {
     const username = document.getElementById('modalUsername').value.trim();
@@ -690,7 +725,9 @@ function submitAddUser() {
     // Close modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('addUserModal'));
     modal.hide();
+
 }
+
 
 function prepareCampaignData() {
     // Serialize campaign users to JSON and set in hidden field
@@ -698,7 +735,9 @@ function prepareCampaignData() {
     document.getElementById('campaignUsersData').value = jsonData;
     console.log('Prepared campaign data:', jsonData);
     return true; // Allow form submission
+
 }
+
 
 // Initialize
 updateUserCount();
