@@ -102,7 +102,7 @@
                 <div class="card-header bg-white d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">Campaign Users</h5>
                     <div>
-                        <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="importCsvButton" onclick="triggerFileUpload()">
+                        <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="importCsvButton">
                             <i class="bi bi-upload"></i> Import CSV/XLS
                         </button>
                         <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#addUserModal">
@@ -765,7 +765,7 @@ function handleFileImport(event) {
 console.log("handleFileImport function defined and assigned to window");
 window.handleFileImport = handleFileImport;
 
-// Trigger file upload dialog
+// Trigger file upload dialog - make it globally available
 function triggerFileUpload() {
     console.log("🔘 Import button clicked!");
     const csvUpload = document.getElementById('csvUpload');
@@ -778,12 +778,36 @@ function triggerFileUpload() {
     }
 }
 
-// Setup file import handler - simplified and reliable
+// Make function globally available
+window.triggerFileUpload = triggerFileUpload;
+
+// Setup file import handler and button - simplified and reliable
 function setupFileImportHandler() {
     console.log("🔧 Setting up file import handler...");
     
     const csvUpload = document.getElementById("csvUpload");
+    const importButton = document.getElementById("importCsvButton");
     
+    // Setup button click handler
+    if (importButton) {
+        console.log("✅ Import button found");
+        importButton.addEventListener("click", function(e) {
+            e.preventDefault();
+            console.log("🔘 Import button clicked!");
+            if (csvUpload) {
+                console.log("📋 Triggering file dialog...");
+                csvUpload.click();
+            } else {
+                console.error("❌ CSV upload element not found!");
+                alert("Error: File upload element not found. Please refresh the page.");
+            }
+        });
+        console.log("✅ Button click handler attached");
+    } else {
+        console.error("❌ Import button NOT found!");
+    }
+    
+    // Setup file input change handler
     if (csvUpload) {
         console.log("✅ CSV upload element found:", csvUpload);
         
@@ -813,7 +837,6 @@ function setupFileImportHandler() {
         };
         
         console.log("✅ File import handler attached successfully");
-        console.log("✅ Handler test - element:", newCsvUpload);
     } else {
         console.error("❌ CSV upload element NOT found!");
         // Try again after a short delay
