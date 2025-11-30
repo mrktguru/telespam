@@ -320,35 +320,61 @@ updateCounts();
 function handleCSVUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
-    
+
+    // Validate file type
+    const validExtensions = ['.csv', '.xls', '.xlsx'];
+    const fileName = file.name.toLowerCase();
+    const isValid = validExtensions.some(ext => fileName.endsWith(ext));
+
     const status = document.getElementById('importStatus');
     status.style.display = 'block';
-    status.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing...';
-    
+    status.className = 'alert alert-info m-3';
+
+    if (!isValid) {
+        status.className = 'alert alert-danger m-3';
+        status.innerHTML = '<i class="bi bi-x-circle"></i> Invalid file type. Please use CSV, XLS, or XLSX files.';
+        event.target.value = '';
+        return;
+    }
+
+    status.innerHTML = `<i class="bi bi-hourglass-split"></i> Processing ${file.name}...`;
+
     const formData = new FormData();
     formData.append('file', file);
-    
+
     fetch('/users/import-csv', {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
     .then(data => {
         if (data.success) {
-            status.classList.remove('alert-info');
-            status.classList.add('alert-success');
-            status.innerHTML = `<i class="bi bi-check-circle"></i> Imported ${data.count} users! Reloading...`;
+            status.className = 'alert alert-success m-3';
+            let message = `<i class="bi bi-check-circle"></i> Successfully imported ${data.count} user${data.count !== 1 ? 's' : ''}!`;
+            if (data.skipped) {
+                message += ` (${data.skipped} row${data.skipped !== 1 ? 's' : ''} skipped)`;
+            }
+            message += ' Reloading...';
+            status.innerHTML = message;
             setTimeout(() => window.location.reload(), 1500);
         } else {
-            status.classList.remove('alert-info');
-            status.classList.add('alert-danger');
-            status.innerHTML = `<i class="bi bi-x-circle"></i> Error: ${data.error}`;
+            status.className = 'alert alert-danger m-3';
+            status.innerHTML = `<i class="bi bi-x-circle"></i> Error: ${data.error || 'Unknown error'}`;
         }
     })
     .catch(error => {
-        status.classList.remove('alert-info');
-        status.classList.add('alert-danger');
-        status.innerHTML = `<i class="bi bi-x-circle"></i> Error: ${error}`;
+        console.error('Import error:', error);
+        status.className = 'alert alert-danger m-3';
+        status.innerHTML = `<i class="bi bi-x-circle"></i> Network error: ${error.message || 'Failed to upload file'}`;
+    })
+    .finally(() => {
+        // Reset file input
+        event.target.value = '';
     });
 }
 
