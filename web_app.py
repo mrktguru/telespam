@@ -12,6 +12,7 @@ from datetime import datetime
 import asyncio
 import threading
 import time
+import json
 from pathlib import Path
 from telethon import TelegramClient
 from telethon.errors import FloodWaitError, UserPrivacyRestrictedError, PeerFloodError
@@ -150,15 +151,15 @@ def run_campaign_task(campaign_id):
         media_path = settings.get('media_path')
         media_type = settings.get('media_type')
         account_phones = settings.get('accounts', [])
-        user_indices = settings.get('users', [])
 
         # Get accounts
         all_accounts = sheets_manager.get_all_accounts()
         accounts = [acc for acc in all_accounts if acc.get('phone') in account_phones]
 
-        # Get users
-        all_users = sheets_manager.users
-        users = [all_users[int(idx)] for idx in user_indices if int(idx) < len(all_users)]
+        # Get users from campaign_users table (new system)
+        campaign_users = db.get_campaign_users(campaign_id)
+        # Filter only pending users
+        users = [cu for cu in campaign_users if cu.get('status', 'pending') == 'pending']
 
         if not accounts:
             db.add_campaign_log(campaign_id, 'No accounts available', level='error')
@@ -233,9 +234,14 @@ def run_campaign_task(campaign_id):
                     except Exception as conv_error:
                         print(f"Warning: Could not save conversation: {conv_error}")
 
-                    # Update user status
-                    if user.get('user_id'):
-                        sheets_manager.update_user_status(user['user_id'], 'contacted', account_phone)
+                    # Update campaign user status in database
+                    if user.get('id'):  # id is the campaign_users table record ID
+                        db.update_campaign_user_status(
+                            user_id=user['id'],  # campaign_users.id
+                            campaign_id=campaign_id,
+                            status='contacted',
+                            contacted_by=account_phone
+                        )
 
                     # Update account stats
                     daily_sent = int(account.get('daily_sent', 0)) + 1
@@ -463,6 +469,14 @@ def new_campaign():
         # Get selected accounts
         account_ids = request.form.getlist('accounts')
         
+        # Get account phones from account IDs
+        all_accounts = sheets_manager.get_all_accounts()
+        account_phones = []
+        for acc_id in account_ids:
+            account = next((acc for acc in all_accounts if acc.get('id') == acc_id), None)
+            if account and account.get('phone'):
+                account_phones.append(account['phone'])
+        
         # Get campaign users from JSON (sent by JavaScript)
         campaign_users_json = request.form.get('campaign_users_data', '[]')
         try:
@@ -474,7 +488,7 @@ def new_campaign():
             'message': message if message else None,
             'media_path': media_path,
             'media_type': media_type,
-            'accounts': account_ids
+            'accounts': account_phones  # Store phones, not IDs
         }
         
         print(f"DEBUG Campaign settings: message={bool(message)}, media_path={media_path}, media_type={media_type}")
