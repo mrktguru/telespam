@@ -170,11 +170,41 @@ def run_campaign_task(campaign_id):
 
         normalized_saved_phones = [normalize_phone(p) for p in account_phones]
         
-        # Get accounts
+        # Get accounts (exclude limited accounts, but check if they can be restored)
         all_accounts = sheets_manager.get_all_accounts()
         accounts = []
         for acc in all_accounts:
             acc_phone = normalize_phone(acc.get('phone'))
+            
+            # Check if limited account can be restored (after 24 hours)
+            if acc.get('status') == 'limited':
+                last_used = acc.get('last_used_at')
+                if last_used:
+                    try:
+                        last_used_time = datetime.fromisoformat(last_used)
+                        hours_since_limit = (datetime.now() - last_used_time).total_seconds() / 3600
+                        # Restore account after 24 hours
+                        if hours_since_limit >= 24:
+                            db.add_campaign_log(
+                                campaign_id,
+                                f'Account {acc_phone} limited status cleared after {hours_since_limit:.1f} hours, restoring to active',
+                                level='info'
+                            )
+                            sheets_manager.update_account(acc.get('id'), {
+                                'status': 'active',
+                                'last_used_at': datetime.now().isoformat()
+                            })
+                            acc['status'] = 'active'  # Update local copy
+                        else:
+                            # Still limited, skip
+                            continue
+                    except:
+                        # If can't parse date, skip limited account
+                        continue
+                else:
+                    # No last_used_at, skip limited account
+                    continue
+            
             if acc_phone and acc_phone in normalized_saved_phones:
                 accounts.append(acc)
 
@@ -253,6 +283,17 @@ def run_campaign_task(campaign_id):
                         level='success'
                     )
 
+                    # Add delay between messages to avoid rate limits
+                    # Random delay between 30-90 seconds to appear more natural
+                    import random
+                    delay = random.randint(30, 90)
+                    db.add_campaign_log(
+                        campaign_id,
+                        f'Waiting {delay} seconds before next message to avoid rate limits...',
+                        level='info'
+                    )
+                    time.sleep(delay)
+
                     # Save conversation to database
                     try:
                         # Get IP address (proxy or current)
@@ -302,11 +343,47 @@ def run_campaign_task(campaign_id):
                     if 'FloodWait' in str(error_msg):
                         db.add_campaign_log(
                             campaign_id,
-                            f'Account {account_phone} hit flood wait, skipping',
+                            f'Account {account_phone} hit flood wait, switching to next account',
                             level='warning'
                         )
                         # Move to next account
                         account_idx += 1
+                        # Skip this user and continue with next
+                        continue
+                    
+                    # Handle peer flood (account limited by Telegram)
+                    elif 'Peer flood' in str(error_msg) or 'account limited' in str(error_msg).lower():
+                        db.add_campaign_log(
+                            campaign_id,
+                            f'Account {account_phone} limited by Telegram (Peer flood), switching to next account',
+                            level='warning'
+                        )
+                        # Mark account as limited and move to next account
+                        sheets_manager.update_account(account.get('id'), {
+                            'status': 'limited',
+                            'last_used_at': datetime.now().isoformat()
+                        })
+                        # Move to next account
+                        account_idx += 1
+                        # Skip this user and continue with next
+                        continue
+                    
+                    # Handle peer flood (account limited)
+                    elif 'Peer flood' in str(error_msg) or 'account limited' in str(error_msg).lower():
+                        db.add_campaign_log(
+                            campaign_id,
+                            f'Account {account_phone} limited by Telegram (Peer flood), switching to next account',
+                            level='warning'
+                        )
+                        # Mark account as limited and move to next account
+                        sheets_manager.update_account(account.get('id'), {
+                            'status': 'limited',
+                            'last_used_at': datetime.now().isoformat()
+                        })
+                        # Move to next account
+                        account_idx += 1
+                        # Skip this user and continue with next
+                        continue
 
             except Exception as e:
                 failed_count += 1
