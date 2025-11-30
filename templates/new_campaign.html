@@ -9,6 +9,11 @@
         <i class="bi bi-arrow-left"></i> Back
     </a>
 </div>
+<div class="alert alert-warning mb-3" role="alert">
+    <strong>🚀 Version 2.0 - Build 20241130_141841</strong><br>
+    <small>✅ If you see this yellow box, the page has been updated!<br>
+    📋 Check browser console (F12) for detailed import logs.</small>
+</div>
 
 <form method="POST" enctype="multipart/form-data" onsubmit="prepareCampaignData()">
     <!-- Hidden field for campaign users data -->
@@ -292,7 +297,9 @@ mike_wilson,555444333,+5554443333</pre>
 
 {% block extra_js %}
 <script>
-console.log("Campaign JavaScript loaded");
+console.log("\n🚀 ============================================");\nconsole.log("🎯 TELESPAM CAMPAIGN JS v2.0 - BUILD 20241130_141841");\nconsole.log("✨ JavaScript successfully loaded and executing!");\nconsole.log("📅 Timestamp: " + new Date().toISOString());\nconsole.log("🔄 If you see this, cache is cleared!");\nconsole.log("============================================\n");\nconsole.log("Campaign JavaScript loaded");
+
+// TEMPORARY TEST ALERT\nalert("🚀 JavaScript v2.0 loaded! Build: 20241130_141841\\n\\nIf you see this alert, the new code is running.\\nCheck console for detailed logs.\\n\\nClick OK to continue.");
 // Check if SheetJS library is loaded
 if (typeof XLSX !== "undefined") {
     console.log("✅ SheetJS library loaded successfully");
