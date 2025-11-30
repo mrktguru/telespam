@@ -10,7 +10,10 @@
     </a>
 </div>
 
-<form method="POST" enctype="multipart/form-data">
+<form method="POST" enctype="multipart/form-data" onsubmit="prepareCampaignData()">
+    <!-- Hidden field for campaign users data -->
+    <input type="hidden" id="campaignUsersData" name="campaign_users_data" value="[]">
+    
     <div class="row">
         <div class="col-lg-8">
             <!-- Campaign Details -->
@@ -89,47 +92,73 @@
                 </div>
             </div>
 
-            <!-- Select Users -->
+            <!-- Campaign Users -->
             <div class="card mb-4">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0">Select Users</h5>
+                    <h5 class="card-title mb-0">Campaign Users</h5>
                     <div>
                         <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="document.getElementById('csvUpload').click()">
-                            <i class="bi bi-upload"></i> CSV/XLS
+                            <i class="bi bi-upload"></i> Import CSV/XLS
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllUsers()">
-                            Select All
+                        <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#addUserModal">
+                            <i class="bi bi-plus-circle"></i> Add User
                         </button>
                     </div>
                 </div>
-                <input type="file" id="csvUpload" accept=".csv,.xlsx,.xls" style="display: none;" onchange="handleCSVUpload(event)">
+                <input type="file" id="csvUpload" accept=".csv,.xlsx,.xls" style="display: none;" onchange="handleCampaignCSVUpload(event)">
+                
+                <!-- Import Status -->
                 <div id="importStatus" class="alert alert-info m-3" style="display: none;"></div>
-                <div class="card-body" style="max-height: 400px; overflow-y: auto;">
-                    {% if users %}
-                        {% for user in users %}
-                        <div class="form-check mb-2">
-                            <input class="form-check-input user-checkbox" type="checkbox"
-                                   name="users" value="{{ loop.index0 }}" id="user{{ loop.index }}">
-                            <label class="form-check-label" for="user{{ loop.index }}">
-                                <strong>@{{ user.username or 'N/A' }}</strong>
-                                {% if user.user_id %}
-                                    <small class="text-muted">(ID: {{ user.user_id }})</small>
-                                {% endif %}
-                                <span class="badge bg-{{ 'info' if user.status == 'pending' else 'secondary' }} ms-2">
-                                    {{ user.status }}
-                                </span>
-                            </label>
+                
+                <!-- Filters -->
+                <div class="card-body border-bottom">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <input type="text" class="form-control form-control-sm" id="filterUsername" placeholder="Search by username..." onkeyup="filterCampaignUsers()">
                         </div>
-                        {% endfor %}
-                    {% else %}
-                        <div class="text-center text-muted py-4">
-                            <i class="bi bi-people" style="font-size: 2rem;"></i>
-                            <p class="mt-2 mb-0">No users available. Add users first.</p>
-                            <a href="{{ url_for('users_list') }}" class="btn btn-sm btn-primary mt-2">
-                                Add Users
-                            </a>
+                        <div class="col-md-3">
+                            <input type="text" class="form-control form-control-sm" id="filterUserId" placeholder="User ID..." onkeyup="filterCampaignUsers()">
                         </div>
-                    {% endif %}
+                        <div class="col-md-3">
+                            <select class="form-select form-select-sm" id="filterPriority" onchange="filterCampaignUsers()">
+                                <option value="">All Priorities</option>
+                                <option value="1">Priority 1</option>
+                                <option value="2">Priority 2</option>
+                                <option value="3">Priority 3</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="button" class="btn btn-sm btn-secondary w-100" onclick="clearCampaignFilters()">Clear</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Users Table -->
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-sm table-striped mb-0" id="campaignUsersTable">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th width="40">
+                                        <input type="checkbox" id="selectAllUsers" onchange="toggleAllCampaignUsers(this)">
+                                    </th>
+                                    <th>Username</th>
+                                    <th>User ID</th>
+                                    <th>Phone</th>
+                                    <th>Priority</th>
+                                    <th width="60">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="campaignUsersBody">
+                                <!-- Users will be dynamically added here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="noUsersMessage" class="p-4 text-center text-muted">
+                        <i class="bi bi-people fs-3 d-block mb-2"></i>
+                        <p class="mb-0">No users added to this campaign yet.</p>
+                        <small>Import users via CSV/Excel or add manually.</small>
+                    </div>
                 </div>
             </div>
         </div>
@@ -195,6 +224,48 @@
         </div>
     </div>
 </form>
+
+<!-- Add User Modal -->
+<div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add User to Campaign</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addUserForm">
+                    <div class="mb-3">
+                        <label for="modalUsername" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="modalUsername" placeholder="@username">
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalUserId" class="form-label">User ID</label>
+                        <input type="text" class="form-control" id="modalUserId" placeholder="123456789">
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalPhone" class="form-label">Phone</label>
+                        <input type="text" class="form-control" id="modalPhone" placeholder="+1234567890">
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalPriority" class="form-label">Priority</label>
+                        <select class="form-select" id="modalPriority">
+                            <option value="1">Priority 1 (High)</option>
+                            <option value="2">Priority 2 (Medium)</option>
+                            <option value="3">Priority 3 (Low)</option>
+                        </select>
+                    </div>
+                    <small class="text-muted">At least one field (username, user ID, or phone) must be provided.</small>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitAddUser()">Add User</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -312,5 +383,191 @@ function clearMedia() {
     document.getElementById('mediaFile').value = '';
     document.getElementById('mediaPreview').style.display = 'none';
 }
-</script>
+
+// ========================================================================
+// CAMPAIGN USERS MANAGEMENT
+// ========================================================================
+
+let campaignUsers = []; // Store users for this campaign
+
+function updateUserCount() {
+    const count = campaignUsers.length;
+    document.getElementById('userCount').textContent = count;
+    
+    // Show/hide table vs empty message
+    const table = document.getElementById('campaignUsersTable').parentElement;
+    const message = document.getElementById('noUsersMessage');
+    
+    if (count > 0) {
+        table.style.display = 'block';
+        message.style.display = 'none';
+    } else {
+        table.style.display = 'none';
+        message.style.display = 'block';
+    }
+}
+
+function addCampaignUser(username, user_id, phone, priority = 1) {
+    const user = {
+        id: Date.now(), // temporary ID
+        username: username,
+        user_id: user_id,
+        phone: phone,
+        priority: priority
+    };
+    
+    campaignUsers.push(user);
+    renderCampaignUsers();
+    updateUserCount();
+}
+
+function removeCampaignUser(tempId) {
+    campaignUsers = campaignUsers.filter(user => user.id !== tempId);
+    renderCampaignUsers();
+    updateUserCount();
+}
+
+function renderCampaignUsers() {
+    const tbody = document.getElementById('campaignUsersBody');
+    tbody.innerHTML = '';
+    
+    campaignUsers.forEach(user => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>
+                <input type="checkbox" class="form-check-input user-checkbox" name="campaign_users" value="${user.id}">
+            </td>
+            <td>@${user.username || 'N/A'}</td>
+            <td>${user.user_id || ''}</td>
+            <td>${user.phone || ''}</td>
+            <td>
+                <span class="badge bg-info">${user.priority}</span>
+            </td>
+            <td>
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeCampaignUser(${user.id})">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function filterCampaignUsers() {
+    const usernameFilter = document.getElementById('filterUsername').value.toLowerCase();
+    const userIdFilter = document.getElementById('filterUserId').value.toLowerCase();
+    const priorityFilter = document.getElementById('filterPriority').value;
+    
+    const rows = document.querySelectorAll('#campaignUsersBody tr');
+    
+    rows.forEach(row => {
+        const username = row.cells[1].textContent.toLowerCase();
+        const userId = row.cells[2].textContent.toLowerCase();
+        const priority = row.cells[3].textContent;
+        
+        const matchUsername = !usernameFilter || username.includes(usernameFilter);
+        const matchUserId = !userIdFilter || userId.includes(userIdFilter);
+        const matchPriority = !priorityFilter || priority.includes(priorityFilter);
+        
+        row.style.display = matchUsername && matchUserId && matchPriority ? '' : 'none';
+    });
+}
+
+function clearCampaignFilters() {
+    document.getElementById('filterUsername').value = '';
+    document.getElementById('filterUserId').value = '';
+    document.getElementById('filterPriority').value = '';
+    filterCampaignUsers();
+}
+
+function toggleAllCampaignUsers(checkbox) {
+    const checkboxes = document.querySelectorAll('.user-checkbox');
+    checkboxes.forEach(cb => cb.checked = checkbox.checked);
+}
+
+function handleCampaignCSVUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const status = document.getElementById('importStatus');
+    status.style.display = 'block';
+    status.className = 'alert alert-info m-3';
+    status.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing...';
+    
+    // Read CSV file
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const lines = e.target.result.split('\n');
+            let imported = 0;
+            
+            // Skip header line
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                
+                const columns = line.split(',');
+                const username = columns[0]?.trim();
+                const user_id = columns[1]?.trim();
+                const phone = columns[2]?.trim();
+                const priority = parseInt(columns[3]?.trim()) || 1;
+                
+                if (username || user_id || phone) {
+                    addCampaignUser(username, user_id, phone, priority);
+                    imported++;
+                }
+            }
+            
+            status.className = 'alert alert-success m-3';
+            status.innerHTML = `<i class="bi bi-check-circle"></i> Imported ${imported} users successfully!`;
+            
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 3000);
+            
+        } catch (error) {
+            status.className = 'alert alert-danger m-3';
+            status.innerHTML = `<i class="bi bi-x-circle"></i> Error reading file: ${error.message}`;
+        }
+    };
+    
+    reader.readAsText(file);
+}
+
+function submitAddUser() {
+    const username = document.getElementById('modalUsername').value.trim();
+    const user_id = document.getElementById('modalUserId').value.trim();
+    const phone = document.getElementById('modalPhone').value.trim();
+    const priority = parseInt(document.getElementById('modalPriority').value);
+    
+    // Validation
+    if (!username && !user_id && !phone) {
+        alert('Please provide at least one field (username, user ID, or phone)');
+        return;
+    }
+    
+    // Clean username
+    const cleanUsername = username.replace('@', '');
+    
+    // Add user
+    addCampaignUser(cleanUsername, user_id, phone, priority);
+    
+    // Clear form
+    document.getElementById('addUserForm').reset();
+    
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('addUserModal'));
+    modal.hide();
+}
+
+function prepareCampaignData() {
+    // Serialize campaign users to JSON and set in hidden field
+    const jsonData = JSON.stringify(campaignUsers);
+    document.getElementById('campaignUsersData').value = jsonData;
+    console.log('Prepared campaign data:', jsonData);
+    return true; // Allow form submission
+}
+
+// Initialize
+updateUserCount();
 {% endblock %}
