@@ -101,14 +101,21 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             return False, 'User not found'
 
         # Send message with or without media, using HTML parsing
-        if media_path and media_type and Path(media_path).exists():
-            # Send with media
-            if media_type == 'photo':
-                await client.send_file(target, media_path, caption=message_text, parse_mode='html')
-            elif media_type == 'video':
-                await client.send_file(target, media_path, caption=message_text, parse_mode='html')
-            elif media_type == 'audio':
-                await client.send_file(target, media_path, caption=message_text, parse_mode='html')
+        if media_path and media_type:
+            media_file = Path(media_path)
+            if media_file.exists():
+                print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+                # Send with media - use file path directly
+                if media_type == 'photo':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'video':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'audio':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+            else:
+                print(f"DEBUG: Media file not found: {media_path}")
+                # File doesn't exist, send text only
+                await client.send_message(target, message_text, parse_mode='html')
         else:
             # Send text only with HTML formatting
             await client.send_message(target, message_text, parse_mode='html')
@@ -613,10 +620,7 @@ def send_conversation_message(conversation_id):
     if not conversation:
         return jsonify({'error': 'Conversation not found'}), 404
     
-    message_text = request.form.get('message')
-    if not message_text:
-        flash('Message text is required', 'danger')
-        return redirect(url_for('view_conversation', conversation_id=conversation_id))
+    message_text = request.form.get('message', '').strip()
     
     # Handle media upload
     media_path = None
@@ -642,6 +646,11 @@ def send_conversation_message(conversation_id):
                 media_type = 'video'
             elif ext in ['mp3', 'ogg', 'wav', 'm4a']:
                 media_type = 'audio'
+    
+    # Validate: at least text or media must be provided
+    if not message_text and not (media_path and media_type):
+        flash('Please provide either a message or media file', 'warning')
+        return redirect(url_for('view_conversation', conversation_id=conversation_id))
     
     # Get account
     account = sheets_manager.get_account(conversation['sender_account_id'])
@@ -679,14 +688,21 @@ def send_conversation_message(conversation_id):
                     return False, 'Account not authorized'
                 
                 # Send message with or without media, using HTML parsing
-                if media_path and media_type and Path(media_path).exists():
-                    # Send with media
-                    if media_type == 'photo':
-                        await client.send_file(user_id, media_path, caption=message_text, parse_mode='html')
-                    elif media_type == 'video':
-                        await client.send_file(user_id, media_path, caption=message_text, parse_mode='html')
-                    elif media_type == 'audio':
-                        await client.send_file(user_id, media_path, caption=message_text, parse_mode='html')
+                if media_path and media_type:
+                    media_file_path = Path(media_path)
+                    if media_file_path.exists():
+                        print(f"DEBUG: Sending conversation media: {media_path} (size: {media_file_path.stat().st_size} bytes)")
+                        # Send with media
+                        if media_type == 'photo':
+                            await client.send_file(user_id, media_file_path, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        elif media_type == 'video':
+                            await client.send_file(user_id, media_file_path, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        elif media_type == 'audio':
+                            await client.send_file(user_id, media_file_path, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                    else:
+                        print(f"DEBUG: Conversation media file not found: {media_path}")
+                        # Send text only if file doesn't exist
+                        await client.send_message(user_id, message_text, parse_mode='html')
                 else:
                     # Send text only with HTML formatting
                     await client.send_message(user_id, message_text, parse_mode='html')
@@ -707,8 +723,9 @@ def send_conversation_message(conversation_id):
         loop.close()
         
         if success:
-            # Save message to database
-            db.add_message(conversation_id, 'outgoing', message_text)
+            # Save message to database (use media info if no text)
+            msg_to_save = message_text if message_text else f'[Media: {media_type}]' if media_type else 'Message sent'
+            db.add_message(conversation_id, 'outgoing', msg_to_save)
             flash('Message sent successfully', 'success')
         else:
             flash(f'Failed to send message: {error}', 'danger')
