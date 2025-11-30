@@ -15,7 +15,7 @@
     📋 Check browser console (F12) for detailed import logs.</small>
 </div>
 
-<form method="POST" enctype="multipart/form-data" onsubmit="prepareCampaignData()">
+<form method="POST" enctype="multipart/form-data" onsubmit="return window.prepareCampaignData();">
     <!-- Hidden field for campaign users data -->
     <input type="hidden" id="campaignUsersData" name="campaign_users_data" value="[]">
     
@@ -304,10 +304,10 @@ mike_wilson,555444333,+5554443333</pre>
 <script>
 console.log("Campaign JavaScript loaded");
 
-// SIMPLE TEST - this should always work
-console.log("🧪 TEST: Script is executing");
+// Campaign users array - must be global
+let campaignUsers = [];
 
-// Define function FIRST, before anything else - GLOBALLY
+// Define functions FIRST, before anything else - GLOBALLY
 window.triggerFileUpload = function() {
     const csvUpload = document.getElementById('csvUpload');
     if (!csvUpload) {
@@ -317,6 +317,21 @@ window.triggerFileUpload = function() {
     }
     csvUpload.click();
     return false;
+};
+
+// Prepare campaign data before form submission - GLOBALLY
+window.prepareCampaignData = function() {
+    console.log('Preparing campaign data...');
+    const jsonData = JSON.stringify(campaignUsers);
+    const hiddenField = document.getElementById('campaignUsersData');
+    if (hiddenField) {
+        hiddenField.value = jsonData;
+        console.log('Prepared campaign data:', jsonData);
+        console.log('Campaign users count:', campaignUsers.length);
+    } else {
+        console.error('campaignUsersData field not found!');
+    }
+    return true; // Allow form submission
 };
 
 (function() {
@@ -493,7 +508,7 @@ function clearMedia() {
 // CAMPAIGN USERS MANAGEMENT
 // ========================================================================
 
-let campaignUsers = []; // Store users for this campaign
+// campaignUsers is already defined globally at the top of the script
 
 function updateUserCount() {
     const count = campaignUsers.length;
@@ -1025,15 +1040,7 @@ function submitAddUser() {
 
 }
 
-
-function prepareCampaignData() {
-    // Serialize campaign users to JSON and set in hidden field
-    const jsonData = JSON.stringify(campaignUsers);
-    document.getElementById('campaignUsersData').value = jsonData;
-    console.log('Prepared campaign data:', jsonData);
-    return true; // Allow form submission
-
-}
+// prepareCampaignData is already defined globally at the top of the script
 
 
 // Initialize
