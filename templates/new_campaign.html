@@ -105,7 +105,7 @@
                         </button>
                     </div>
                 </div>
-                <input type="file" id="csvUpload" accept=".csv,.xlsx,.xls" style="display: none;" onchange="handleFileImport(event)">
+                <input type="file" id="csvUpload" accept=".csv,.xlsx,.xls" style="display: none;" onchange="console.log("onchange triggered"); if (typeof handleFileImport === "function") { handleFileImport(event); } else { alert("handleFileImport not found! Available functions: " + Object.keys(window).filter(k => k.includes("handle")).join(", ")); }">
                 
                 <!-- Import Status -->
                 <div id="importStatus" class="alert alert-info m-3" style="display: none;"></div>
@@ -697,6 +697,7 @@ function handleFileImport(event) {
 }
 
 // Make the function globally available for onclick handlers
+console.log("handleFileImport function defined and assigned to window");
 window.handleFileImport = handleFileImport;
 
 
