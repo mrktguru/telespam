@@ -699,6 +699,43 @@ def view_conversation(conversation_id):
                          campaign=campaign)
 
 
+def find_account_by_id_or_phone(account_id: str):
+    """
+    Find account by ID, or if not found, try to find by phone extracted from ID.
+    This handles cases where account ID was changed (e.g., acc_{phone}_{campaign_id})
+    """
+    # First try to find by exact ID
+    account = sheets_manager.get_account(account_id)
+    if account:
+        return account
+    
+    # If not found, try to extract phone from ID format: acc_{phone}_{campaign_id}
+    # or find among all accounts by matching phone
+    all_accounts = sheets_manager.get_all_accounts()
+    
+    # Try to extract phone from ID if it follows the pattern acc_{phone}_{campaign_id}
+    if account_id.startswith('acc_'):
+        parts = account_id.split('_')
+        if len(parts) >= 2:
+            # Phone might be in parts[1] (for format acc_phone_campaign)
+            # Or we need to find account with phone that matches part of the ID
+            for acc in all_accounts:
+                acc_phone = acc.get('phone', '')
+                if acc_phone:
+                    # Normalize phone for comparison
+                    phone_clean = acc_phone.replace('+', '').replace(' ', '').replace('-', '')
+                    # Check if phone is in the account_id
+                    if phone_clean in account_id.replace('+', '').replace(' ', '').replace('-', ''):
+                        return acc
+    
+    # Last resort: try to find by matching any part of ID
+    for acc in all_accounts:
+        if acc.get('id') == account_id:
+            return acc
+    
+    return None
+
+
 @app.route('/conversations/<int:conversation_id>/send', methods=['POST'])
 @login_required
 def send_conversation_message(conversation_id):
@@ -740,8 +777,8 @@ def send_conversation_message(conversation_id):
         flash('Please provide either a message or media file', 'warning')
         return redirect(url_for('view_conversation', conversation_id=conversation_id))
     
-    # Get account
-    account = sheets_manager.get_account(conversation['sender_account_id'])
+    # Get account (try to find even if ID changed)
+    account = find_account_by_id_or_phone(conversation['sender_account_id'])
     if not account:
         flash('Sender account not found', 'danger')
         return redirect(url_for('view_conversation', conversation_id=conversation_id))
@@ -832,8 +869,8 @@ def fetch_conversation_messages(conversation_id):
     if not conversation:
         return jsonify({'error': 'Conversation not found'}), 404
     
-    # Get account
-    account = sheets_manager.get_account(conversation['sender_account_id'])
+    # Get account (try to find even if ID changed)
+    account = find_account_by_id_or_phone(conversation['sender_account_id'])
     if not account:
         return jsonify({'error': 'Sender account not found'}), 404
     
