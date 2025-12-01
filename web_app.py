@@ -6,7 +6,7 @@ Web Interface - Flask application for Telegram Outreach System
 import os
 os.environ['USE_MOCK_STORAGE'] = 'true'
 
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_file
 from functools import wraps
 from datetime import datetime
 import asyncio
@@ -1108,6 +1108,76 @@ def delete_account(account_id):
         flash(f'Error deleting account: {str(e)}', 'danger')
     
     return redirect(url_for('accounts_list'))
+
+
+@app.route('/accounts/<account_id>/profile-photo')
+@login_required
+def get_account_profile_photo(account_id):
+    """Get account profile photo"""
+    try:
+        account = sheets_manager.get_account(account_id)
+        if not account:
+            # Return 1x1 transparent pixel as placeholder
+            from io import BytesIO
+            import base64
+            transparent = base64.b64decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7')
+            return send_file(BytesIO(transparent), mimetype='image/gif')
+        
+        # Check if account has photos
+        photo_count = account.get('photo_count', 0)
+        if photo_count and photo_count > 0:
+            # Try to get photo from Telegram
+            import asyncio
+            from pathlib import Path
+            from telethon import TelegramClient
+            import config
+            
+            phone = account.get('phone', '')
+            session_file = Path(__file__).parent / 'sessions' / f'{phone.replace("+", "")}.session'
+            
+            if session_file.exists():
+                async def get_photo():
+                    client = TelegramClient(
+                        str(session_file.with_suffix('')),
+                        config.API_ID,
+                        config.API_HASH
+                    )
+                    try:
+                        await client.connect()
+                        if await client.is_user_authorized():
+                            me = await client.get_me()
+                            # Download profile photo
+                            photo_bytes = await client.download_profile_photo(me, file=bytes)
+                            if photo_bytes:
+                                return photo_bytes
+                        return None
+                    except Exception as e:
+                        print(f"Error getting profile photo: {e}")
+                        return None
+                    finally:
+                        try:
+                            await client.disconnect()
+                        except:
+                            pass
+                
+                photo_data = asyncio.run(get_photo())
+                if photo_data:
+                    from io import BytesIO
+                    return send_file(BytesIO(photo_data), mimetype='image/jpeg')
+        
+        # Return 1x1 transparent pixel as placeholder
+        from io import BytesIO
+        import base64
+        transparent = base64.b64decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7')
+        return send_file(BytesIO(transparent), mimetype='image/gif')
+        
+    except Exception as e:
+        print(f"Error in get_account_profile_photo: {e}")
+        # Return 1x1 transparent pixel as placeholder
+        from io import BytesIO
+        import base64
+        transparent = base64.b64decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7')
+        return send_file(BytesIO(transparent), mimetype='image/gif')
 
 
 @app.route('/accounts/edit/<account_id>', methods=['GET', 'POST'])
