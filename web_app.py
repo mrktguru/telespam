@@ -1069,11 +1069,17 @@ def delete_conversation(conversation_id):
 def accounts_list():
     """List all accounts"""
     accounts = sheets_manager.get_all_accounts()
+    
+    print(f"DEBUG: Found {len(accounts)} accounts in storage")
 
-    # Add rate limit stats
+    # Add rate limit stats (handle errors gracefully)
     for acc in accounts:
-        stats = rate_limiter.get_stats(acc['id'])
-        acc['rate_limits'] = stats
+        try:
+            stats = rate_limiter.get_stats(acc.get('id', ''))
+            acc['rate_limits'] = stats
+        except Exception as e:
+            print(f"Warning: Could not get rate limits for account {acc.get('id')}: {e}")
+            acc['rate_limits'] = None
 
     return render_template('accounts.html', accounts=accounts)
 
@@ -1237,6 +1243,275 @@ def edit_account(account_id):
     
     # GET request - show form
     return render_template('edit_account.html', account=account)
+
+
+@app.route('/accounts/add/tdata', methods=['POST'])
+@login_required
+def add_account_tdata():
+    """Add account from TDATA/SESSION/JSON file"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if not file or not file.filename:
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+        
+        notes = request.form.get('notes', '')
+        
+        # Save uploaded file
+        upload_dir = Path(__file__).parent / 'uploads' / 'accounts'
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{timestamp}_{file.filename}"
+        filepath = upload_dir / filename
+        file.save(str(filepath))
+        
+        # Import converter functions
+        from converter import detect_and_process
+        from accounts import add_account
+        import asyncio
+        
+        # Process file based on extension
+        file_ext = Path(file.filename).suffix.lower()
+        
+        async def process():
+            if file_ext == '.json':
+                # JSON credentials - need to create session
+                import json
+                from telethon import TelegramClient
+                
+                with open(filepath, 'r') as f:
+                    creds = json.load(f)
+                
+                phone = creds.get('phone')
+                api_id = int(creds.get('api_id'))
+                api_hash = creds.get('api_hash')
+                password = creds.get('password')
+                
+                sessions_dir = Path(__file__).parent / 'sessions'
+                sessions_dir.mkdir(exist_ok=True)
+                session_file = sessions_dir / f"{phone.replace('+', '')}.session"
+                
+                client = TelegramClient(str(session_file.with_suffix('')), api_id, api_hash)
+                
+                try:
+                    await client.connect()
+                    if not await client.is_user_authorized():
+                        return {'success': False, 'error': 'Session not authorized. Please use manual method with code.'}
+                    
+                    me = await client.get_me()
+                    await client.disconnect()
+                    
+                    account_data = {
+                        'phone': me.phone,
+                        'username': me.username or '',
+                        'first_name': me.first_name,
+                        'last_name': me.last_name or '',
+                        'session_file': str(session_file),
+                        'status': 'active',
+                        'notes': notes or 'Web added from JSON'
+                    }
+                    
+                    add_result = await add_account(account_data)
+                    return add_result
+                except Exception as e:
+                    await client.disconnect()
+                    return {'success': False, 'error': str(e)}
+            else:
+                # TDATA or SESSION file
+                result = await detect_and_process(str(filepath), notes or 'Web added account')
+                
+                if result['success']:
+                    account_data = result['account']
+                    add_result = await add_account(account_data)
+                    return add_result
+                else:
+                    return {'success': False, 'error': result.get('error', 'Processing failed')}
+        
+        result = asyncio.run(process())
+        
+        # Clean up uploaded file
+        try:
+            filepath.unlink()
+        except:
+            pass
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/accounts/add/manual', methods=['POST'])
+@login_required
+def add_account_manual():
+    """Add account manually with phone and API credentials"""
+    try:
+        phone = request.form.get('phone', '').strip()
+        api_id = request.form.get('api_id', '').strip()
+        api_hash = request.form.get('api_hash', '').strip()
+        password = request.form.get('password', '').strip()
+        notes = request.form.get('notes', '').strip()
+        
+        if not phone or not api_id or not api_hash:
+            return jsonify({'success': False, 'error': 'Phone, API ID, and API Hash are required'}), 400
+        
+        try:
+            api_id = int(api_id)
+        except ValueError:
+            return jsonify({'success': False, 'error': 'API ID must be a number'}), 400
+        
+        if len(api_hash) != 32:
+            return jsonify({'success': False, 'error': 'API Hash must be exactly 32 characters'}), 400
+        
+        from telethon import TelegramClient
+        from accounts import add_account
+        import asyncio
+        
+        async def process():
+            # Normalize phone (remove +, spaces, etc.)
+            phone_normalized = phone.replace('+', '').replace(' ', '').replace('-', '').strip()
+            session_name = phone_normalized
+            
+            sessions_dir = Path(__file__).parent / 'sessions'
+            sessions_dir.mkdir(exist_ok=True)
+            session_file = sessions_dir / f"{session_name}.session"
+            
+            client = TelegramClient(str(session_file.with_suffix('')), api_id, api_hash)
+            
+            try:
+                await client.connect()
+                
+                if not await client.is_user_authorized():
+                    # Send code
+                    await client.send_code_request(phone_normalized)
+                    return {'success': False, 'error': 'AUTH_CODE_REQUIRED', 'message': 'Please check your phone for the authentication code and submit it via the form'}
+                
+                me = await client.get_me()
+                await client.disconnect()
+                
+                account_data = {
+                    'phone': me.phone,
+                    'username': me.username or '',
+                    'first_name': me.first_name,
+                    'last_name': me.last_name or '',
+                    'session_file': str(session_file),
+                    'status': 'active',
+                    'notes': notes or 'Web added manually'
+                }
+                
+                add_result = await add_account(account_data)
+                return add_result
+                
+            except Exception as e:
+                try:
+                    await client.disconnect()
+                except:
+                    pass
+                return {'success': False, 'error': str(e)}
+        
+        result = asyncio.run(process())
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/accounts/add/authkey', methods=['POST'])
+@login_required
+def add_account_authkey():
+    """Add account from AUTH KEY and DC ID"""
+    try:
+        phone = request.form.get('phone', '').strip()
+        auth_key_hex = request.form.get('auth_key', '').strip()
+        dc_id = request.form.get('dc_id', '').strip()
+        user_id = request.form.get('user_id', '').strip()
+        notes = request.form.get('notes', '').strip()
+        
+        if not phone or not auth_key_hex or not dc_id:
+            return jsonify({'success': False, 'error': 'Phone, AUTH KEY, and DC ID are required'}), 400
+        
+        try:
+            auth_key = bytes.fromhex(auth_key_hex.replace(' ', ''))
+            if len(auth_key) != 256:
+                return jsonify({'success': False, 'error': 'AUTH KEY must be 256 bytes (512 hex characters)'}), 400
+        except ValueError:
+            return jsonify({'success': False, 'error': 'Invalid AUTH KEY format (must be hex)'}), 400
+        
+        try:
+            dc_id = int(dc_id)
+            if dc_id < 1 or dc_id > 5:
+                return jsonify({'success': False, 'error': 'DC ID must be between 1 and 5'}), 400
+        except ValueError:
+            return jsonify({'success': False, 'error': 'DC ID must be a number'}), 400
+        
+        from add_account_from_session_data import create_session_file
+        from accounts import add_account
+        import asyncio
+        
+        async def process():
+            # Normalize phone (remove +, spaces, etc.)
+            phone_normalized = phone.replace('+', '').replace(' ', '').replace('-', '').strip()
+            session_name = phone_normalized
+            
+            sessions_dir = Path(__file__).parent / 'sessions'
+            sessions_dir.mkdir(exist_ok=True)
+            session_file = sessions_dir / f"{session_name}.session"
+            
+            # Create session file
+            await create_session_file(str(session_file.with_suffix('')), auth_key, dc_id)
+            
+            # Try to get account info
+            from telethon import TelegramClient
+            import config
+            
+            client = TelegramClient(str(session_file.with_suffix('')), config.API_ID, config.API_HASH)
+            
+            try:
+                await client.connect()
+                
+                if await client.is_user_authorized():
+                    me = await client.get_me()
+                    account_data = {
+                        'phone': me.phone,
+                        'username': me.username or '',
+                        'first_name': me.first_name,
+                        'last_name': me.last_name or '',
+                        'session_file': str(session_file),
+                        'status': 'active',
+                        'notes': notes or 'Web added from AUTH KEY'
+                    }
+                else:
+                    # Use provided user_id or phone
+                    account_data = {
+                        'phone': phone_normalized,
+                        'username': '',
+                        'first_name': '',
+                        'last_name': '',
+                        'session_file': str(session_file),
+                        'status': 'active',
+                        'notes': notes or 'Web added from AUTH KEY'
+                    }
+                
+                await client.disconnect()
+                
+                add_result = await add_account(account_data)
+                return add_result
+                
+            except Exception as e:
+                try:
+                    await client.disconnect()
+                except:
+                    pass
+                return {'success': False, 'error': str(e)}
+        
+        result = asyncio.run(process())
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
 
 
 @app.route('/accounts/delete-photos/<account_id>', methods=['POST'])
