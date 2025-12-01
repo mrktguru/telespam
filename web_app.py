@@ -84,10 +84,52 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         # Priority 1: User ID
         if user.get('user_id'):
             try:
-                target = await client.get_entity(int(user['user_id']))
-                print(f"DEBUG: Found user by ID: {user['user_id']}")
+                # Convert user_id to int (can be string from DB)
+                user_id_str = str(user['user_id']).strip()
+                if not user_id_str:
+                    raise ValueError("Empty user_id")
+                
+                user_id = int(user_id_str)
+                print(f"DEBUG: Attempting to find user by ID: {user_id} (original: {user.get('user_id')})")
+                
+                # Try to get entity by ID - this works if user is in contacts or was contacted before
+                try:
+                    target = await client.get_entity(user_id)
+                    print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id}")
+                except (ValueError, TypeError) as ve:
+                    # If get_entity fails with ValueError (user not found), try other methods
+                    print(f"DEBUG: get_entity failed for ID {user_id}: {ve}, trying alternative methods...")
+                    try:
+                        from telethon.tl.types import InputPeerUser
+                        from telethon.tl.functions.users import GetUsersRequest
+                        
+                        # Try to get user info to get access_hash
+                        users_result = await client(GetUsersRequest([user_id]))
+                        if users_result and len(users_result) > 0:
+                            user_obj = users_result[0]
+                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                            print(f"DEBUG: ✓ Found user by ID using GetUsersRequest: {user_id}")
+                        else:
+                            # If we can't get access_hash, try direct send with user_id
+                            # Telegram will resolve it if the user was contacted before
+                            target = user_id
+                            print(f"DEBUG: Using user_id directly (no access_hash): {user_id}")
+                    except Exception as e2:
+                        print(f"DEBUG: GetUsersRequest failed for ID {user_id}: {e2}")
+                        # Last resort: use user_id directly - Telegram may resolve it
+                        target = user_id
+                        print(f"DEBUG: Using user_id directly as fallback: {user_id}")
+                except Exception as e:
+                    print(f"DEBUG: Unexpected error finding user by ID {user_id}: {e}")
+                    # Fallback: use user_id directly
+                    target = user_id
+                    print(f"DEBUG: Using user_id directly after error: {user_id}")
+            except (ValueError, TypeError) as e:
+                print(f"DEBUG: Invalid user_id format: {user.get('user_id')} - {e}")
+                # user_id is invalid, continue to try username/phone
+                pass
             except Exception as e:
-                print(f"DEBUG: Failed to find user by ID {user['user_id']}: {e}")
+                print(f"DEBUG: Failed to process user_id {user.get('user_id')}: {e}")
                 pass
 
         # Priority 2: Username (only if ID not found or not provided)
@@ -177,7 +219,9 @@ def run_campaign_task(campaign_id):
         normalized_saved_phones = [normalize_phone(p) for p in account_phones]
         
         # Get accounts (exclude limited accounts, but check if they can be restored)
+        # Don't reload from file - use in-memory state which is always up-to-date
         all_accounts = sheets_manager.get_all_accounts()
+        print(f"DEBUG Campaign {campaign_id}: Found {len(all_accounts)} total accounts in memory")
         accounts = []
         for acc in all_accounts:
             acc_phone = normalize_phone(acc.get('phone'))
@@ -266,8 +310,20 @@ def run_campaign_task(campaign_id):
             account_phone = account.get('phone', 'unknown')
 
             # Get user identifier with priority: ID -> Username -> Phone
-            user_identifier = user.get('user_id') or user.get('username') or user.get('phone') or 'unknown'
-            identifier_type = 'ID' if user.get('user_id') else ('Username' if user.get('username') else 'Phone')
+            # Ensure user_id is properly formatted (can be string or int from DB)
+            user_id_value = user.get('user_id')
+            if user_id_value:
+                # Convert to string for display, but keep original for sending
+                try:
+                    user_id_value = int(user_id_value) if str(user_id_value).isdigit() else user_id_value
+                except:
+                    pass
+            
+            user_identifier = user_id_value or user.get('username') or user.get('phone') or 'unknown'
+            identifier_type = 'ID' if user_id_value else ('Username' if user.get('username') else 'Phone')
+            
+            # Debug: log what we're trying to send
+            print(f"DEBUG Campaign {campaign_id}: Sending to user - ID: {user_id_value}, Username: {user.get('username')}, Phone: {user.get('phone')}")
 
             # Check rate limit
             if not rate_limiter.can_send(account_phone):
@@ -1119,10 +1175,10 @@ def delete_conversation(conversation_id):
 @login_required
 def accounts_list():
     """List all accounts"""
-    # Reload accounts from file to ensure we have latest data
-    sheets_manager._load_from_file()
+    # Don't reload from file here - it overwrites in-memory changes
+    # Only load on startup, changes are saved immediately
     accounts = sheets_manager.get_all_accounts()
-    
+
     print(f"DEBUG: Found {len(accounts)} accounts in storage")
     for i, acc in enumerate(accounts):
         print(f"DEBUG: Account {i+1}: id={acc.get('id')}, phone={acc.get('phone')}, status={acc.get('status')}")
@@ -1462,10 +1518,8 @@ def add_account_tdata():
         
         result = asyncio.run(process())
         
-        # Verify account was added and reload data
+        # Verify account was added (don't reload - in-memory state is correct)
         if result.get('success'):
-            # Force reload from file to ensure we have latest data
-            sheets_manager._load_from_file()
             accounts_after = sheets_manager.get_all_accounts()
             print(f"DEBUG: Accounts after addition: {len(accounts_after)}")
             result['accounts_count'] = len(accounts_after)
@@ -1552,9 +1606,8 @@ def add_account_manual():
         
         result = asyncio.run(process())
         
-        # Verify account was added and reload data
+        # Verify account was added (don't reload - in-memory state is correct)
         if result.get('success'):
-            sheets_manager._load_from_file()
             accounts_after = sheets_manager.get_all_accounts()
             print(f"DEBUG: Accounts after manual addition: {len(accounts_after)}")
             result['accounts_count'] = len(accounts_after)

@@ -128,10 +128,8 @@ class MockSheetsManager:
         saved_count = len(self.accounts)
         print(f"✓ Account added: {account.get('id')} - {account.get('phone')} (Total accounts: {saved_count})")
         
-        # Reload from file to verify persistence
-        self._load_from_file()
-        if len(self.accounts) != saved_count:
-            print(f"⚠ WARNING: Account count mismatch after reload! Expected {saved_count}, got {len(self.accounts)}")
+        # Don't reload from file here - it would overwrite in-memory changes
+        # File is already saved, in-memory state is correct
         
         return True
 
@@ -156,10 +154,14 @@ class MockSheetsManager:
                     self.accounts[i]['id'] = new_id
                     print(f"✓ Account ID changed: {account_id} → {new_id}")
                 
+                # Update account fields
                 self.accounts[i].update(updates)
                 self._save_to_file()
                 print(f"✓ Account updated: {self.accounts[i].get('id')} - {updates}")
+                print(f"  Updated account phone: {self.accounts[i].get('phone')}, status: {self.accounts[i].get('status')}")
+                # Don't reload from file - in-memory state is correct
                 return True
+        print(f"⚠ Account not found for update: {account_id}")
         return False
 
     def delete_account(self, account_id: str) -> bool:
