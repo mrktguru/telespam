@@ -28,7 +28,7 @@
                         <p class="text-muted mb-0">{{ account.first_name }} {{ account.last_name or '' }}</p>
                     </div>
                     <div class="d-flex flex-column align-items-end">
-                        <span class="badge bg-{{ 'success' if account.status == 'active' else 'warning' if account.status == 'warming' else 'secondary' }} mb-2">
+                        <span class="badge bg-{{ 'success' if account.status == 'active' else 'warning' if account.status == 'warming' else 'danger' if account.status == 'unauthorized' else 'secondary' }} mb-2">
                             {{ account.status }}
                         </span>
                         <!-- Profile Photo Preview -->

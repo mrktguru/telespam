@@ -76,7 +76,15 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
 
         if not await client.is_user_authorized():
             await client.disconnect()
-            return False, 'Account not authorized'
+            # Mark account as unauthorized so it's not used in future campaigns
+            account_id = account.get('id')
+            if account_id:
+                sheets_manager.update_account(account_id, {
+                    'status': 'unauthorized',
+                    'last_used_at': datetime.now().isoformat()
+                })
+                print(f"⚠ Account {account.get('phone')} ({account_id}) marked as unauthorized")
+            return False, 'Account not authorized - session expired or invalid'
 
         # Find user by priority: ID (1) -> Username (2) -> Phone (3)
         target = None
@@ -218,13 +226,22 @@ def run_campaign_task(campaign_id):
 
         normalized_saved_phones = [normalize_phone(p) for p in account_phones]
         
-        # Get accounts (exclude limited accounts, but check if they can be restored)
+        # Get accounts (exclude limited and unauthorized accounts, but check if they can be restored)
         # Don't reload from file - use in-memory state which is always up-to-date
         all_accounts = sheets_manager.get_all_accounts()
         print(f"DEBUG Campaign {campaign_id}: Found {len(all_accounts)} total accounts in memory")
         accounts = []
         for acc in all_accounts:
             acc_phone = normalize_phone(acc.get('phone'))
+            
+            # Skip unauthorized accounts (session expired)
+            if acc.get('status') == 'unauthorized':
+                db.add_campaign_log(
+                    campaign_id,
+                    f'Account {acc_phone} is unauthorized (session expired), skipping',
+                    level='warning'
+                )
+                continue
             
             # Check if limited account can be restored (after 24 hours)
             if acc.get('status') == 'limited':
