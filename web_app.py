@@ -27,6 +27,9 @@ import config
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 
+# Global dictionary to track campaign stop flags
+campaign_stop_flags = {}
+
 # Initialize managers
 rate_limiter = RateLimiter()
 proxy_manager = ProxyManager()
@@ -152,6 +155,9 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
 def run_campaign_task(campaign_id):
     """Run campaign in background thread"""
     try:
+        # Initialize stop flag for this campaign
+        campaign_stop_flags[campaign_id] = False
+        
         campaign = db.get_campaign(campaign_id)
         if not campaign:
             return
@@ -250,6 +256,12 @@ def run_campaign_task(campaign_id):
         asyncio.set_event_loop(loop)
 
         for user in users:
+            # Check if campaign should be stopped
+            if campaign_stop_flags.get(campaign_id, False):
+                db.add_campaign_log(campaign_id, 'Campaign stopped by user', level='warning')
+                db.update_campaign(campaign_id, status='stopped')
+                return
+            
             account = accounts[account_idx % len(accounts)]
             account_phone = account.get('phone', 'unknown')
 
@@ -292,7 +304,17 @@ def run_campaign_task(campaign_id):
                         f'Waiting {delay} seconds before next message to avoid rate limits...',
                         level='info'
                     )
-                    time.sleep(delay)
+                    # Check for stop flag during delay (check every 5 seconds)
+                    for _ in range(delay // 5):
+                        if campaign_stop_flags.get(campaign_id, False):
+                            db.add_campaign_log(campaign_id, 'Campaign stopped by user during delay', level='warning')
+                            db.update_campaign(campaign_id, status='stopped')
+                            return
+                        time.sleep(5)
+                    # Sleep remaining time
+                    remaining = delay % 5
+                    if remaining > 0:
+                        time.sleep(remaining)
 
                     # Save conversation to database
                     try:
@@ -407,13 +429,20 @@ def run_campaign_task(campaign_id):
 
         loop.close()
 
-        # Mark as completed
-        db.update_campaign(campaign_id, status='completed')
-        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
-
+        # Check if stopped before marking as completed
+        if campaign_stop_flags.get(campaign_id, False):
+            db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
+            db.update_campaign(campaign_id, status='stopped')
+        else:
+            # Mark as completed
+            db.update_campaign(campaign_id, status='completed')
+            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
+    finally:
+        # Clean up stop flag
+        campaign_stop_flags.pop(campaign_id, None)
 
 
 # ============================================================================
@@ -687,6 +716,9 @@ def start_campaign(campaign_id):
     if not campaign:
         return jsonify({'error': 'Campaign not found'}), 404
 
+    # Reset stop flag
+    campaign_stop_flags[campaign_id] = False
+
     # Update status
     db.update_campaign(campaign_id, status='running')
     db.add_campaign_log(campaign_id, 'Campaign started', level='info')
@@ -696,6 +728,25 @@ def start_campaign(campaign_id):
     thread.start()
 
     return jsonify({'success': True, 'message': 'Campaign started'})
+
+
+@app.route('/campaigns/<int:campaign_id>/stop', methods=['POST'])
+@login_required
+def stop_campaign(campaign_id):
+    """Stop running campaign"""
+    campaign = db.get_campaign(campaign_id)
+
+    if not campaign:
+        return jsonify({'error': 'Campaign not found'}), 404
+
+    if campaign['status'] != 'running':
+        return jsonify({'error': 'Campaign is not running'}), 400
+
+    # Set stop flag
+    campaign_stop_flags[campaign_id] = True
+    db.add_campaign_log(campaign_id, 'Stop request received', level='warning')
+
+    return jsonify({'success': True, 'message': 'Campaign stop requested'})
 
 
 @app.route('/campaigns/<int:campaign_id>/progress')
