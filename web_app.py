@@ -1071,16 +1071,23 @@ def accounts_list():
     accounts = sheets_manager.get_all_accounts()
     
     print(f"DEBUG: Found {len(accounts)} accounts in storage")
+    for i, acc in enumerate(accounts):
+        print(f"DEBUG: Account {i+1}: id={acc.get('id')}, phone={acc.get('phone')}, status={acc.get('status')}")
 
     # Add rate limit stats (handle errors gracefully)
     for acc in accounts:
         try:
-            stats = rate_limiter.get_stats(acc.get('id', ''))
-            acc['rate_limits'] = stats
+            acc_id = acc.get('id', '')
+            if acc_id:
+                stats = rate_limiter.get_stats(acc_id)
+                acc['rate_limits'] = stats
+            else:
+                acc['rate_limits'] = None
         except Exception as e:
             print(f"Warning: Could not get rate limits for account {acc.get('id')}: {e}")
             acc['rate_limits'] = None
 
+    print(f"DEBUG: Returning {len(accounts)} accounts to template")
     return render_template('accounts.html', accounts=accounts)
 
 
