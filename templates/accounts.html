@@ -16,6 +16,7 @@
 </div>
 
 {% if accounts %}
+<p class="text-muted mb-3"><strong>Total accounts: {{ accounts|length }}</strong></p>
 <div class="row g-3">
     {% for account in accounts %}
     <div class="col-md-6 col-lg-4">
@@ -132,21 +133,34 @@
             <div class="modal-body">
                 <ul class="nav nav-tabs mb-3" id="addAccountTabs" role="tablist">
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="tdata-tab" data-bs-toggle="tab" data-bs-target="#tdata" type="button" role="tab">
+                        <button class="nav-link active" id="tdata-tab" data-bs-toggle="tab" data-bs-target="#tdata" type="button" role="tab" style="color: #495057;">
                             <i class="bi bi-file-zip"></i> TDATA/SESSION/JSON
                         </button>
                     </li>
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual" type="button" role="tab">
+                        <button class="nav-link" id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual" type="button" role="tab" style="color: #495057;">
                             <i class="bi bi-phone"></i> Manual (Phone + API)
                         </button>
                     </li>
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="authkey-tab" data-bs-toggle="tab" data-bs-target="#authkey" type="button" role="tab">
+                        <button class="nav-link" id="authkey-tab" data-bs-toggle="tab" data-bs-target="#authkey" type="button" role="tab" style="color: #495057;">
                             <i class="bi bi-key"></i> AUTH KEY
                         </button>
                     </li>
                 </ul>
+                
+                <style>
+                .nav-tabs .nav-link {
+                    color: #495057 !important;
+                }
+                .nav-tabs .nav-link.active {
+                    color: #0d6efd !important;
+                    font-weight: 500;
+                }
+                .nav-tabs .nav-link:hover {
+                    color: #0d6efd !important;
+                }
+                </style>
                 
                 <div class="tab-content" id="addAccountTabContent">
                     <!-- TDATA/SESSION/JSON Tab -->
