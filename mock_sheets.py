@@ -3,6 +3,7 @@
 from typing import Dict, List, Optional
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 
 
@@ -48,27 +49,65 @@ class MockSheetsManager:
             print(f"ℹ Storage file {self.storage_file} does not exist, starting with empty data")
 
     def _save_to_file(self):
-        """Save data to JSON file"""
-        try:
-            data = {
-                'accounts': self.accounts,
-                'dialogs': self.dialogs,
-                'users': self.users,
-                'logs': self.logs[-100:],  # Keep last 100 logs
-                'settings': self.settings
-            }
-            # Use atomic write to prevent data loss
-            import tempfile
-            temp_file = self.storage_file.with_suffix('.tmp')
-            with open(temp_file, 'w') as f:
-                json.dump(data, f, indent=2)
-            # Atomic replace
-            temp_file.replace(self.storage_file)
-            print(f"✓ Saved {len(self.accounts)} accounts to {self.storage_file}")
-        except Exception as e:
-            print(f"❌ Could not save test data: {e}")
-            import traceback
-            traceback.print_exc()
+        """Save data to JSON file with retry logic"""
+        import time
+        max_retries = 3
+        retry_delay = 0.1
+        
+        for attempt in range(max_retries):
+            try:
+                data = {
+                    'accounts': self.accounts,
+                    'dialogs': self.dialogs,
+                    'users': self.users,
+                    'logs': self.logs[-100:],  # Keep last 100 logs
+                    'settings': self.settings
+                }
+                # Use atomic write to prevent data loss
+                import tempfile
+                temp_file = self.storage_file.with_suffix('.tmp')
+                
+                # Ensure directory exists
+                self.storage_file.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Write to temp file
+                with open(temp_file, 'w') as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())  # Force write to disk
+                
+                # Atomic replace
+                if self.storage_file.exists():
+                    # Remove old file first on Windows
+                    try:
+                        self.storage_file.unlink()
+                    except:
+                        pass
+                
+                temp_file.replace(self.storage_file)
+                print(f"✓ Saved {len(self.accounts)} accounts to {self.storage_file}")
+                return
+                
+            except PermissionError as e:
+                if attempt < max_retries - 1:
+                    print(f"⚠ Permission error (attempt {attempt + 1}/{max_retries}), retrying...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    print(f"❌ Could not save test data: Permission denied. Check file permissions: {self.storage_file}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"⚠ Error saving (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    print(f"❌ Could not save test data after {max_retries} attempts: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
 
     # Accounts operations
 

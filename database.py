@@ -4,6 +4,7 @@ Database models for web interface - SQLite
 """
 
 import sqlite3
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict
@@ -19,12 +20,30 @@ class Database:
         self.init_db()
 
     def get_connection(self):
-        """Get database connection"""
-        conn = sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        # Enable WAL mode for better concurrency
-        conn.execute('PRAGMA journal_mode=WAL')
-        return conn
+        """Get database connection with proper error handling"""
+        try:
+            # Ensure database file exists and is writable
+            if self.db_path.exists():
+                # Check if file is writable
+                if not os.access(self.db_path, os.W_OK):
+                    raise PermissionError(f"Database file {self.db_path} is not writable")
+            
+            conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            # Enable WAL mode for better concurrency
+            try:
+                conn.execute('PRAGMA journal_mode=WAL')
+            except sqlite3.OperationalError:
+                # If WAL fails, try DELETE mode
+                conn.execute('PRAGMA journal_mode=DELETE')
+            return conn
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e).lower():
+                raise Exception(f"Database is locked. Please close other processes using the database. Error: {e}")
+            elif "readonly" in str(e).lower():
+                raise Exception(f"Database is read-only. Check file permissions: {self.db_path}")
+            else:
+                raise
 
     def init_db(self):
         """Initialize database tables"""
