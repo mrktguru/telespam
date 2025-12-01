@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+
+{% block title %}Create Accounts - Telegram Outreach{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 fw-bold">Create Telegram Accounts</h1>
+    <div>
+        <button class="btn btn-primary" onclick="addPhone()">
+            <i class="bi bi-plus-circle"></i> Add Phone Number
+        </button>
+        <button class="btn btn-outline-secondary ms-2" onclick="checkAllAccounts()">
+            <i class="bi bi-arrow-clockwise"></i> Check All
+        </button>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Phone</th>
+                        <th>Registration Status</th>
+                        <th>Action</th>
+                        <th>Check Status</th>
+                        <th>Files</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="accountsTableBody">
+                    <tr>
+                        <td colspan="6" class="text-center text-muted">
+                            <i class="bi bi-hourglass-split"></i> Loading...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let accounts = [];
+
+// Load accounts on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadAccounts();
+    // Auto-refresh every 3 seconds
+    setInterval(loadAccounts, 3000);
+});
+
+async function loadAccounts() {
+    try {
+        const response = await fetch('/api/registration/accounts');
+        accounts = await response.json();
+        renderTable();
+    } catch (error) {
+        console.error('Error loading accounts:', error);
+    }
+}
+
+function renderTable() {
+    const tbody = document.getElementById('accountsTableBody');
+    
+    if (accounts.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center text-muted py-4">
+                    <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                    <p class="mt-2 mb-0">No phone numbers added yet</p>
+                    <small>Click "Add Phone Number" to get started</small>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = accounts.map(acc => {
+        const statusBadge = getStatusBadge(acc.status);
+        const checkBadge = getCheckBadge(acc.check_status, acc.check_message);
+        const actionCell = getActionCell(acc);
+        const filesCell = getFilesCell(acc);
+        
+        return `
+            <tr>
+                <td><strong>${acc.phone}</strong></td>
+                <td>${statusBadge}</td>
+                <td>${actionCell}</td>
+                <td>${checkBadge}</td>
+                <td>${filesCell}</td>
+                <td>
+                    ${acc.status === 'registered' ? `<button class="btn btn-sm btn-outline-primary" onclick="checkAccount('${acc.phone}')" title="Re-check account">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>` : ''}
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteAccount('${acc.phone}')" title="Delete account">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function getStatusBadge(status) {
+    const badges = {
+        'new': '<span class="badge bg-secondary">New</span>',
+        'code_sent': '<span class="badge bg-info">Code Sent</span>',
+        'waiting_code': '<span class="badge bg-warning">Waiting Code</span>',
+        'registered': '<span class="badge bg-success">Registered</span>',
+        'error': '<span class="badge bg-danger">Error</span>'
+    };
+    return badges[status] || `<span class="badge bg-secondary">${status}</span>`;
+}
+
+function getCheckBadge(checkStatus, checkMessage) {
+    if (!checkStatus) return '<span class="text-muted">-</span>';
+    
+    const badges = {
+        'active': '<span class="badge bg-success">✓ Active</span>',
+        'limited': '<span class="badge bg-warning">⚠ Limited</span>',
+        'banned': '<span class="badge bg-danger">✗ Banned</span>',
+        'checking': '<span class="badge bg-info">🔄 Checking...</span>'
+    };
+    
+    const badge = badges[checkStatus] || `<span class="badge bg-secondary">${checkStatus}</span>`;
+    const message = checkMessage ? `<br><small class="text-muted">${checkMessage}</small>` : '';
+    return badge + message;
+}
+
+function getActionCell(acc) {
+    if (acc.status === 'new') {
+        return `<button class="btn btn-sm btn-primary" onclick="startRegistration('${acc.phone}')">Start</button>`;
+    } else if (acc.status === 'code_sent' || acc.status === 'waiting_code') {
+        return `
+            <div class="d-flex gap-2">
+                <input type="text" class="form-control form-control-sm" id="code-${acc.phone}" 
+                       placeholder="Code" maxlength="5" style="width: 80px;">
+                <button class="btn btn-sm btn-success" onclick="submitCode('${acc.phone}')">Submit</button>
+            </div>
+        `;
+    } else if (acc.status === 'registered') {
+        return '<span class="text-muted">-</span>';
+    } else if (acc.status === 'error') {
+        return `<small class="text-danger">${acc.error_message || 'Error'}</small>`;
+    }
+    return '-';
+}
+
+function getFilesCell(acc) {
+    if (acc.status !== 'registered') {
+        return '<span class="text-muted">-</span>';
+    }
+    
+    const buttons = [];
+    if (acc.has_tdata) {
+        buttons.push(`<button class="btn btn-sm btn-outline-primary" onclick="downloadTdata('${acc.phone}')">
+            <i class="bi bi-download"></i> tdata
+        </button>`);
+    }
+    if (acc.has_session) {
+        buttons.push(`<button class="btn btn-sm btn-outline-primary" onclick="downloadSession('${acc.phone}')">
+            <i class="bi bi-download"></i> session
+        </button>`);
+    }
+    
+    return buttons.length > 0 ? buttons.join(' ') : '<span class="text-muted">-</span>';
+}
+
+async function addPhone() {
+    const phone = prompt('Enter phone number (with country code, e.g., +79123456789):');
+    if (!phone) return;
+    
+    if (!phone.match(/^\+[1-9]\d{1,14}$/)) {
+        alert('Invalid phone number format. Please use format: +79123456789');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/registration/add-phone', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({phone})
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            loadAccounts();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to add phone'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function startRegistration(phone) {
+    try {
+        const response = await fetch('/api/registration/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({phone})
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('Code sent to ' + phone + '. Please check your Telegram app.');
+            loadAccounts();
+        } else {
+            alert('Error: ' + (result.error || result.message || 'Failed to start registration'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function submitCode(phone) {
+    const codeInput = document.getElementById(`code-${phone}`);
+    const code = codeInput.value.trim();
+    
+    if (!code || code.length < 5) {
+        alert('Please enter a valid 5-digit code');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/registration/submit-code', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({phone, code})
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('Registration successful!');
+            loadAccounts();
+        } else {
+            alert('Error: ' + (result.error || result.message || 'Failed to submit code'));
+            if (result.error === 'PhoneCodeExpiredError') {
+                // Offer to resend code
+                if (confirm('Code expired. Would you like to request a new code?')) {
+                    startRegistration(phone);
+                }
+            }
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function checkAccount(phone) {
+    try {
+        const response = await fetch('/api/registration/check-account', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({phone})
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            loadAccounts();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to check account'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function checkAllAccounts() {
+    if (!confirm('Check all registered accounts? This may take a while.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/registration/check-all', {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert(`Checked ${result.checked} accounts. Active: ${result.results.active}, Limited: ${result.results.limited}, Banned: ${result.results.banned}`);
+            loadAccounts();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to check accounts'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function downloadTdata(phone) {
+    window.location.href = `/api/registration/download-tdata/${encodeURIComponent(phone)}`;
+}
+
+function downloadSession(phone) {
+    window.location.href = `/api/registration/download-session/${encodeURIComponent(phone)}`;
+}
+
+async function deleteAccount(phone) {
+    if (!confirm(`Delete account ${phone}? This will remove it from the registration list.`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/registration/delete-account/${encodeURIComponent(phone)}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            loadAccounts();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to delete account'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+</script>
+{% endblock %}
+

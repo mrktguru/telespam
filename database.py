@@ -123,6 +123,22 @@ class Database:
             )
         ''')
 
+        # Registration accounts table - for account registration process
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS registration_accounts (
+                phone TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'new',
+                session_id TEXT,
+                check_status TEXT,
+                check_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                registered_at TIMESTAMP,
+                tdata_path TEXT,
+                session_path TEXT,
+                error_message TEXT
+            )
+        ''')
+
         # Campaign users table - links users to specific campaigns
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS campaign_users (
@@ -775,6 +791,94 @@ class Database:
             conn.commit()
         except Exception as e:
             print(f"Error updating campaign user status: {e}")
+        finally:
+            conn.close()
+
+    # Registration accounts operations
+    def add_registration_account(self, phone: str) -> bool:
+        """Add new phone number for registration"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                '''INSERT OR IGNORE INTO registration_accounts (phone, status)
+                   VALUES (?, 'new')''',
+                (phone,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Error adding registration account: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def get_registration_account(self, phone: str) -> Optional[Dict]:
+        """Get registration account by phone"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'SELECT * FROM registration_accounts WHERE phone = ?',
+                (phone,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            print(f"Error getting registration account: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_all_registration_accounts(self) -> List[Dict]:
+        """Get all registration accounts"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'SELECT * FROM registration_accounts ORDER BY created_at DESC'
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Error getting registration accounts: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def update_registration_account(self, phone: str, updates: Dict) -> bool:
+        """Update registration account"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
+            values = list(updates.values()) + [phone]
+            cursor.execute(
+                f'UPDATE registration_accounts SET {set_clause} WHERE phone = ?',
+                values
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Error updating registration account: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def delete_registration_account(self, phone: str) -> bool:
+        """Delete registration account"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'DELETE FROM registration_accounts WHERE phone = ?',
+                (phone,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Error deleting registration account: {e}")
+            return False
         finally:
             conn.close()
 
