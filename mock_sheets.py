@@ -39,9 +39,13 @@ class MockSheetsManager:
                     self.users = data.get('users', [])
                     self.logs = data.get('logs', [])
                     self.settings = data.get('settings', self.settings)
-                print(f"Loaded test data from {self.storage_file}")
+                print(f"✓ Loaded {len(self.accounts)} accounts from {self.storage_file}")
             except Exception as e:
-                print(f"Could not load test data: {e}")
+                print(f"❌ Could not load test data: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"ℹ Storage file {self.storage_file} does not exist, starting with empty data")
 
     def _save_to_file(self):
         """Save data to JSON file"""
@@ -53,18 +57,43 @@ class MockSheetsManager:
                 'logs': self.logs[-100:],  # Keep last 100 logs
                 'settings': self.settings
             }
-            with open(self.storage_file, 'w') as f:
+            # Use atomic write to prevent data loss
+            import tempfile
+            temp_file = self.storage_file.with_suffix('.tmp')
+            with open(temp_file, 'w') as f:
                 json.dump(data, f, indent=2)
+            # Atomic replace
+            temp_file.replace(self.storage_file)
+            print(f"✓ Saved {len(self.accounts)} accounts to {self.storage_file}")
         except Exception as e:
-            print(f"Could not save test data: {e}")
+            print(f"❌ Could not save test data: {e}")
+            import traceback
+            traceback.print_exc()
 
     # Accounts operations
 
     def add_account(self, account: Dict) -> bool:
         """Add new account (always starts as 'free' account without campaign_id)"""
+        # Check if account with same ID already exists
+        account_id = account.get('id')
+        if account_id:
+            for existing in self.accounts:
+                if existing.get('id') == account_id:
+                    print(f"⚠ Account with ID {account_id} already exists, skipping duplicate")
+                    return False
+        
         self.accounts.append(account)
         self._save_to_file()
-        print(f"✓ Account added: {account.get('id')} - {account.get('phone')}")
+        
+        # Verify account was saved
+        saved_count = len(self.accounts)
+        print(f"✓ Account added: {account.get('id')} - {account.get('phone')} (Total accounts: {saved_count})")
+        
+        # Reload from file to verify persistence
+        self._load_from_file()
+        if len(self.accounts) != saved_count:
+            print(f"⚠ WARNING: Account count mismatch after reload! Expected {saved_count}, got {len(self.accounts)}")
+        
         return True
 
     def get_account(self, account_id: str) -> Optional[Dict]:

@@ -1068,6 +1068,8 @@ def delete_conversation(conversation_id):
 @login_required
 def accounts_list():
     """List all accounts"""
+    # Reload accounts from file to ensure we have latest data
+    sheets_manager._load_from_file()
     accounts = sheets_manager.get_all_accounts()
     
     print(f"DEBUG: Found {len(accounts)} accounts in storage")
@@ -1339,6 +1341,14 @@ def add_account_tdata():
         
         result = asyncio.run(process())
         
+        # Verify account was added and reload data
+        if result.get('success'):
+            # Force reload from file to ensure we have latest data
+            sheets_manager._load_from_file()
+            accounts_after = sheets_manager.get_all_accounts()
+            print(f"DEBUG: Accounts after addition: {len(accounts_after)}")
+            result['accounts_count'] = len(accounts_after)
+        
         # Clean up uploaded file
         try:
             filepath.unlink()
@@ -1420,6 +1430,14 @@ def add_account_manual():
                 return {'success': False, 'error': str(e)}
         
         result = asyncio.run(process())
+        
+        # Verify account was added and reload data
+        if result.get('success'):
+            sheets_manager._load_from_file()
+            accounts_after = sheets_manager.get_all_accounts()
+            print(f"DEBUG: Accounts after manual addition: {len(accounts_after)}")
+            result['accounts_count'] = len(accounts_after)
+        
         return jsonify(result)
         
     except Exception as e:
@@ -1515,6 +1533,14 @@ def add_account_authkey():
                 return {'success': False, 'error': str(e)}
         
         result = asyncio.run(process())
+        
+        # Verify account was added and reload data
+        if result.get('success'):
+            sheets_manager._load_from_file()
+            accounts_after = sheets_manager.get_all_accounts()
+            print(f"DEBUG: Accounts after authkey addition: {len(accounts_after)}")
+            result['accounts_count'] = len(accounts_after)
+        
         return jsonify(result)
         
     except Exception as e:
