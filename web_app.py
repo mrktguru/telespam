@@ -15,7 +15,7 @@ import time
 import json
 from pathlib import Path
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError, UserPrivacyRestrictedError, PeerFloodError
+from telethon.errors import FloodWaitError, UserPrivacyRestrictedError, PeerFloodError, PhoneNumberInvalidError, PhoneCodeInvalidError, PhoneCodeExpiredError, SessionPasswordNeededError
 from telethon.tl.functions.users import GetFullUserRequest
 
 from database import db
@@ -29,6 +29,9 @@ app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # Global dictionary to track campaign stop flags
 campaign_stop_flags = {}
+
+# Global dictionary to store active registration sessions (phone -> TelegramClient)
+registration_sessions = {}
 
 # Initialize managers
 rate_limiter = RateLimiter()
@@ -127,7 +130,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                         # Last resort: use user_id directly - Telegram may resolve it
                         target = user_id
                         print(f"DEBUG: Using user_id directly as fallback: {user_id}")
-                except Exception as e:
+            except Exception as e:
                     print(f"DEBUG: Unexpected error finding user by ID {user_id}: {e}")
                     # Fallback: use user_id directly
                     target = user_id
@@ -507,9 +510,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -740,15 +743,15 @@ def new_campaign():
             account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
             if account:
                 account_id = account.get('id')
-                # Generate new ID: acc_{phone}_{campaign_id}
+                    # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
-                
-                # Update account with new ID and campaign_id
-                sheets_manager.update_account(account_id, {
-                    'new_id': new_account_id,
-                    'campaign_id': campaign_id
-                })
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    
+                    # Update account with new ID and campaign_id
+                    sheets_manager.update_account(account_id, {
+                        'new_id': new_account_id,
+                        'campaign_id': campaign_id
+                    })
                 print(f"✓ Assigned campaign {campaign_id} to account {account_id} ({phone}) → {new_account_id}")
 
         flash('Campaign created! Starting...', 'success')
@@ -1206,7 +1209,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-                acc['rate_limits'] = stats
+        acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
@@ -2101,6 +2104,474 @@ def api_stats():
 # ============================================================================
 # ERROR HANDLERS
 # ============================================================================
+
+# ============================================================================
+# ACCOUNT REGISTRATION ROUTES
+# ============================================================================
+
+@app.route('/create-accounts')
+@login_required
+def create_accounts():
+    """Account registration management page"""
+    return render_template('create_accounts.html')
+
+
+@app.route('/api/registration/accounts')
+@login_required
+def get_registration_accounts():
+    """Get all registration accounts"""
+    accounts = db.get_all_registration_accounts()
+    
+    # Add file existence flags
+    for acc in accounts:
+        phone_clean = acc['phone'].replace('+', '').replace(' ', '').replace('-', '')
+        storage_dir = Path(__file__).parent / 'storage' / phone_clean
+        
+        acc['has_tdata'] = (storage_dir / 'tdata.zip').exists() if storage_dir.exists() else False
+        acc['has_session'] = (storage_dir / 'session.session').exists() if storage_dir.exists() else False
+    
+    return jsonify(accounts)
+
+
+@app.route('/api/registration/add-phone', methods=['POST'])
+@login_required
+def add_registration_phone():
+    """Add new phone number for registration"""
+    try:
+        data = request.get_json()
+        phone = data.get('phone', '').strip()
+        
+        if not phone:
+            return jsonify({'success': False, 'error': 'Phone number is required'}), 400
+        
+        # Validate phone format
+        if not phone.startswith('+'):
+            return jsonify({'success': False, 'error': 'Phone number must start with +'}), 400
+        
+        success = db.add_registration_account(phone)
+        if success:
+            return jsonify({'success': True, 'message': 'Phone added successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Phone already exists or failed to add'}), 400
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/registration/start', methods=['POST'])
+@login_required
+def start_registration():
+    """Start registration - send code to phone"""
+    try:
+        data = request.get_json()
+        phone = data.get('phone', '').strip()
+        
+        if not phone:
+            return jsonify({'success': False, 'error': 'Phone number is required'}), 400
+        
+        account = db.get_registration_account(phone)
+        if not account:
+            return jsonify({'success': False, 'error': 'Phone not found'}), 404
+        
+        import asyncio
+        from telethon import TelegramClient
+        from telethon.errors import PhoneNumberInvalidError, FloodWaitError
+        import config
+        import uuid
+        
+        async def send_code():
+            # Create temporary session for registration
+            session_id = str(uuid.uuid4())
+            phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
+            storage_dir = Path(__file__).parent / 'storage' / phone_clean
+            storage_dir.mkdir(parents=True, exist_ok=True)
+            session_file = storage_dir / f'temp_{session_id}'
+            
+            client = TelegramClient(str(session_file.with_suffix('')), config.API_ID, config.API_HASH)
+            
+            try:
+                await client.connect()
+                
+                # Check if already authorized
+                if await client.is_user_authorized():
+                    await client.disconnect()
+                    return {'success': False, 'error': 'Account already registered'}
+                
+                # Send code
+                result = await client.send_code_request(phone)
+                phone_code_hash = result.phone_code_hash
+                
+                # Store session info
+                registration_sessions[phone] = {
+                    'client': client,
+                    'session_file': session_file,
+                    'phone_code_hash': phone_code_hash,
+                    'session_id': session_id
+                }
+                
+                # Update status
+                db.update_registration_account(phone, {
+                    'status': 'code_sent',
+                    'session_id': session_id
+                })
+                
+                return {'success': True, 'session_id': session_id, 'message': 'Code sent to phone'}
+                
+            except PhoneNumberInvalidError:
+                await client.disconnect()
+                return {'success': False, 'error': 'Invalid phone number'}
+            except FloodWaitError as e:
+                await client.disconnect()
+                return {'success': False, 'error': f'Flood wait: please try again after {e.seconds} seconds'}
+            except Exception as e:
+                await client.disconnect()
+                return {'success': False, 'error': str(e)}
+        
+        result = asyncio.run(send_code())
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/registration/submit-code', methods=['POST'])
+@login_required
+def submit_registration_code():
+    """Submit verification code"""
+    try:
+        data = request.get_json()
+        phone = data.get('phone', '').strip()
+        code = data.get('code', '').strip()
+        
+        if not phone or not code:
+            return jsonify({'success': False, 'error': 'Phone and code are required'}), 400
+        
+        if phone not in registration_sessions:
+            return jsonify({'success': False, 'error': 'Registration session not found. Please start registration again.'}), 400
+        
+        session_data = registration_sessions[phone]
+        client = session_data['client']
+        phone_code_hash = session_data['phone_code_hash']
+        
+        import asyncio
+        
+        async def sign_in():
+            try:
+                # Sign in with code
+                await client.sign_in(phone, code, phone_code_hash=phone_code_hash)
+                
+                # Get account info
+                me = await client.get_me()
+                
+                # Generate files
+                phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
+                storage_dir = Path(__file__).parent / 'storage' / phone_clean
+                storage_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Copy session file
+                temp_session = session_data['session_file']
+                final_session = storage_dir / 'session.session'
+                import shutil
+                shutil.copy2(f"{temp_session}.session", str(final_session))
+                
+                # Generate tdata (if opentele available)
+                tdata_path = None
+                try:
+                    from opentele.td import TDesktop
+                    tdesk = await TDesktop.from_telethon_file(str(final_session))
+                    tdata_dir = storage_dir / 'tdata'
+                    await tdesk.to_tdata_folder(str(tdata_dir))
+                    
+                    # Create zip
+                    import zipfile
+                    tdata_zip = storage_dir / 'tdata.zip'
+                    with zipfile.ZipFile(tdata_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                        for file_path in tdata_dir.rglob('*'):
+                            if file_path.is_file():
+                                zipf.write(file_path, file_path.relative_to(tdata_dir))
+                    
+                    tdata_path = str(tdata_zip)
+                except ImportError:
+                    print("opentele not available, skipping tdata generation")
+                except Exception as e:
+                    print(f"Error generating tdata: {e}")
+                
+                # Update database
+                db.update_registration_account(phone, {
+                    'status': 'registered',
+                    'registered_at': datetime.now().isoformat(),
+                    'session_path': str(final_session),
+                    'tdata_path': tdata_path
+                })
+                
+                # Clean up temp session
+                try:
+                    Path(f"{temp_session}.session").unlink()
+                except:
+                    pass
+                
+                # Remove from active sessions but keep client for status check
+                # Don't disconnect yet - need for status check
+                
+                # Start account check in background
+                import threading
+                def check_status():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(check_registration_account_status(phone, client))
+                    loop.close()
+                
+                thread = threading.Thread(target=check_status, daemon=True)
+                thread.start()
+                
+                return {'success': True, 'message': 'Registration successful'}
+                
+            except PhoneCodeInvalidError:
+                return {'success': False, 'error': 'PhoneCodeInvalidError', 'message': 'Invalid verification code'}
+            except PhoneCodeExpiredError:
+                return {'success': False, 'error': 'PhoneCodeExpiredError', 'message': 'Code expired. Please request a new code.'}
+            except SessionPasswordNeededError:
+                return {'success': False, 'error': 'SessionPasswordNeededError', 'message': '2FA password required (not yet supported)'}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+        
+        result = asyncio.run(sign_in())
+        
+        # Update status if error
+        if not result.get('success'):
+            db.update_registration_account(phone, {
+                'status': 'error',
+                'error_message': result.get('message', result.get('error', 'Unknown error'))
+            })
+            # Clean up session on error
+            if phone in registration_sessions:
+                try:
+                    asyncio.run(registration_sessions[phone]['client'].disconnect())
+                except:
+                    pass
+                del registration_sessions[phone]
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+async def check_registration_account_status(phone: str, client: TelegramClient):
+    """Check account status after registration"""
+    try:
+        db.update_registration_account(phone, {
+            'check_status': 'checking',
+            'check_message': 'Checking account status...'
+        })
+        
+        # Basic check - get account info
+        me = await client.get_me()
+        
+        # Try to send a test message to self
+        try:
+            await client.send_message('me', 'Test')
+            check_status = 'active'
+            check_message = 'Account is fully functional'
+        except PeerFloodError:
+            check_status = 'limited'
+            check_message = 'Peer flood - account has limitations'
+        except FloodWaitError as e:
+            check_status = 'limited'
+            check_message = f'Flood wait - retry after {e.seconds}s'
+        except Exception as e:
+            check_status = 'limited'
+            check_message = f'Limited: {str(e)}'
+        
+        db.update_registration_account(phone, {
+            'check_status': check_status,
+            'check_message': check_message
+        })
+        
+        await client.disconnect()
+        
+    except Exception as e:
+        db.update_registration_account(phone, {
+            'check_status': 'error',
+            'check_message': f'Check error: {str(e)}'
+        })
+
+
+@app.route('/api/registration/check-account', methods=['POST'])
+@login_required
+def check_registration_account():
+    """Check single account status"""
+    try:
+        data = request.get_json()
+        phone = data.get('phone', '').strip()
+        
+        if not phone:
+            return jsonify({'success': False, 'error': 'Phone number is required'}), 400
+        
+        account = db.get_registration_account(phone)
+        if not account or account['status'] != 'registered':
+            return jsonify({'success': False, 'error': 'Account not registered'}), 400
+        
+        import asyncio
+        from telethon import TelegramClient
+        import config
+        
+        session_path = account.get('session_path')
+        if not session_path or not Path(session_path).exists():
+            return jsonify({'success': False, 'error': 'Session file not found'}), 400
+        
+        async def check():
+            client = TelegramClient(str(Path(session_path).with_suffix('')), config.API_ID, config.API_HASH)
+            try:
+                await client.connect()
+                if not await client.is_user_authorized():
+                    return {'success': False, 'error': 'Account not authorized'}
+                
+                await check_registration_account_status(phone, client)
+                return {'success': True}
+            finally:
+                try:
+                    await client.disconnect()
+                except:
+                    pass
+        
+        asyncio.run(check())
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/registration/check-all', methods=['POST'])
+@login_required
+def check_all_registration_accounts():
+    """Check all registered accounts"""
+    try:
+        accounts = db.get_all_registration_accounts()
+        registered = [acc for acc in accounts if acc['status'] == 'registered']
+        
+        import asyncio
+        from telethon import TelegramClient
+        import config
+        
+        results = {'active': 0, 'limited': 0, 'banned': 0}
+        
+        async def check_all():
+            for acc in registered:
+                session_path = acc.get('session_path')
+                if not session_path or not Path(session_path).exists():
+                    continue
+                
+                try:
+                    client = TelegramClient(str(Path(session_path).with_suffix('')), config.API_ID, config.API_HASH)
+                    await client.connect()
+                    
+                    if await client.is_user_authorized():
+                        await check_registration_account_status(acc['phone'], client)
+                        # Get updated status
+                        updated = db.get_registration_account(acc['phone'])
+                        if updated:
+                            status = updated.get('check_status', 'unknown')
+                            if status == 'active':
+                                results['active'] += 1
+                            elif status == 'limited':
+                                results['limited'] += 1
+                            elif status == 'banned':
+                                results['banned'] += 1
+                    
+                    await client.disconnect()
+                except Exception as e:
+                    print(f"Error checking {acc['phone']}: {e}")
+        
+        asyncio.run(check_all())
+        
+        return jsonify({
+            'success': True,
+            'checked': len(registered),
+            'results': results
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/registration/download-tdata/<phone>')
+@login_required
+def download_registration_tdata(phone):
+    """Download tdata.zip file"""
+    try:
+        account = db.get_registration_account(phone)
+        if not account or not account.get('tdata_path'):
+            flash('tdata file not found', 'danger')
+            return redirect(url_for('create_accounts'))
+        
+        tdata_path = Path(account['tdata_path'])
+        if not tdata_path.exists():
+            flash('tdata file not found', 'danger')
+            return redirect(url_for('create_accounts'))
+        
+        return send_file(str(tdata_path), as_attachment=True, download_name=f'tdata_{phone.replace("+", "")}.zip')
+        
+    except Exception as e:
+        flash(f'Error: {str(e)}', 'danger')
+        return redirect(url_for('create_accounts'))
+
+
+@app.route('/api/registration/download-session/<phone>')
+@login_required
+def download_registration_session(phone):
+    """Download session file"""
+    try:
+        account = db.get_registration_account(phone)
+        if not account or not account.get('session_path'):
+            flash('Session file not found', 'danger')
+            return redirect(url_for('create_accounts'))
+        
+        session_path = Path(account['session_path'])
+        if not session_path.exists():
+            flash('Session file not found', 'danger')
+            return redirect(url_for('create_accounts'))
+        
+        return send_file(str(session_path), as_attachment=True, download_name=f'session_{phone.replace("+", "")}.session')
+        
+    except Exception as e:
+        flash(f'Error: {str(e)}', 'danger')
+        return redirect(url_for('create_accounts'))
+
+
+@app.route('/api/registration/delete-account/<phone>', methods=['DELETE'])
+@login_required
+def delete_registration_account(phone):
+    """Delete registration account"""
+    try:
+        # Clean up session if exists
+        if phone in registration_sessions:
+            try:
+                session_data = registration_sessions[phone]
+                client = session_data['client']
+                asyncio.run(client.disconnect())
+            except:
+                pass
+            del registration_sessions[phone]
+        
+        # Delete files
+        phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
+        storage_dir = Path(__file__).parent / 'storage' / phone_clean
+        if storage_dir.exists():
+            import shutil
+            shutil.rmtree(storage_dir, ignore_errors=True)
+        
+        # Delete from database
+        success = db.delete_registration_account(phone)
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Account deleted'})
+        else:
+            return jsonify({'success': False, 'error': 'Account not found'}), 404
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
 
 @app.errorhandler(404)
 def not_found(error):
