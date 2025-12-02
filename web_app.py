@@ -511,8 +511,8 @@ def run_campaign_task(campaign_id):
             db.update_campaign(campaign_id, status='stopped')
         else:
         # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -746,11 +746,12 @@ def new_campaign():
                     # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
                     new_account_id = f"acc_{phone_clean}_{campaign_id}"
-                                    # Update account with new ID and campaign_id
-                sheets_manager.update_account(account_id, {
-                'new_id': new_account_id,
-                'campaign_id': campaign_id
-                })
+                    
+                    # Update account with new ID and campaign_id
+                    sheets_manager.update_account(account_id, {
+                        'new_id': new_account_id,
+                        'campaign_id': campaign_id
+                    })
                 print(f"✓ Assigned campaign {campaign_id} to account {account_id} ({phone}) → {new_account_id}")
 
         flash('Campaign created! Starting...', 'success')
