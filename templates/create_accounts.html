@@ -230,6 +230,31 @@
     </div>
 </div>
 
+<!-- Registration Progress Modal -->
+<div class="modal fade" id="registrationProgressModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-phone"></i> Registration Progress: <span id="progressPhone"></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="closeProgressBtn" style="display: none;"></button>
+            </div>
+            <div class="modal-body">
+                <div id="registrationLogs" style="max-height: 500px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.85rem; background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 5px;">
+                    <div class="text-center text-muted py-3">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                        <span class="ms-2">Starting registration...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="cancelProgressBtn" style="display: none;">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -887,7 +912,24 @@ async function startRegistrationWithOptions(phone) {
     }
 }
 
+let registrationLogInterval = null;
+let currentRegistrationSession = null;
+
 async function startRegistration(phone, proxyId = null, devicePresetId = null) {
+    // Show progress modal
+    document.getElementById('progressPhone').textContent = phone;
+    document.getElementById('closeProgressBtn').style.display = 'none';
+    document.getElementById('cancelProgressBtn').style.display = 'none';
+    document.getElementById('registrationLogs').innerHTML = `
+        <div class="text-center text-muted py-3">
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            <span class="ms-2">Starting registration...</span>
+        </div>
+    `;
+    
+    const modal = new bootstrap.Modal(document.getElementById('registrationProgressModal'));
+    modal.show();
+    
     try {
         const response = await fetch('/api/registration/start', {
             method: 'POST',
@@ -900,16 +942,118 @@ async function startRegistration(phone, proxyId = null, devicePresetId = null) {
         });
         
         const result = await response.json();
+        
         if (result.success) {
-            alert('Code sent to ' + phone + '. Please check your Telegram app.');
+            // Start polling for logs
+            currentRegistrationSession = result.session_id;
+            startLogPolling(phone, result.session_id);
+            
+            // Show success message after a delay
+            setTimeout(() => {
+                addLogEntry('✓ Registration started successfully!', 'success');
+                document.getElementById('closeProgressBtn').style.display = 'block';
+                document.getElementById('cancelProgressBtn').style.display = 'block';
+            }, 2000);
+            
             loadAccounts();
         } else {
-            alert('Error: ' + (result.error || result.message || 'Failed to start registration'));
+            addLogEntry('✗ Error: ' + (result.error || result.message || 'Failed to start registration'), 'error');
+            document.getElementById('closeProgressBtn').style.display = 'block';
+            document.getElementById('cancelProgressBtn').style.display = 'block';
         }
     } catch (error) {
-        alert('Error: ' + error.message);
+        addLogEntry('✗ Error: ' + error.message, 'error');
+        document.getElementById('closeProgressBtn').style.display = 'block';
+        document.getElementById('cancelProgressBtn').style.display = 'block';
     }
 }
+
+function startLogPolling(phone, sessionId) {
+    let lastLogId = 0;
+    
+    registrationLogInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/registration/logs/${encodeURIComponent(phone)}?session_id=${sessionId}`);
+            const logs = await response.json();
+            
+            // Add new logs
+            logs.forEach(log => {
+                if (log.id > lastLogId) {
+                    addLogEntry(log.message, log.level, log.timestamp);
+                    lastLogId = log.id;
+                }
+            });
+            
+            // Check if registration is complete
+            const accountResponse = await fetch('/api/registration/accounts');
+            const accounts = await accountResponse.json();
+            const account = accounts.find(a => a.phone === phone);
+            
+            if (account && account.status === 'code_sent') {
+                // Registration in progress, continue polling
+            } else if (account && (account.status === 'registered' || account.status === 'error')) {
+                // Registration complete or failed, stop polling
+                clearInterval(registrationLogInterval);
+                document.getElementById('closeProgressBtn').style.display = 'block';
+                document.getElementById('cancelProgressBtn').style.display = 'block';
+            }
+        } catch (error) {
+            console.error('Error polling logs:', error);
+        }
+    }, 1000); // Poll every second
+}
+
+function addLogEntry(message, level, timestamp = null) {
+    const logsDiv = document.getElementById('registrationLogs');
+    const time = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+    
+    let icon = '';
+    let color = '#d4d4d4';
+    
+    if (level === 'success') {
+        icon = '✓';
+        color = '#4ec9b0';
+    } else if (level === 'error') {
+        icon = '✗';
+        color = '#f48771';
+    } else if (level === 'warning') {
+        icon = '⚠';
+        color = '#dcdcaa';
+    } else {
+        icon = 'ℹ';
+        color = '#569cd6';
+    }
+    
+    const logEntry = document.createElement('div');
+    logEntry.style.marginBottom = '5px';
+    logEntry.innerHTML = `<span style="color: #808080;">[${time}]</span> <span style="color: ${color};">${icon}</span> <span>${escapeHtml(message)}</span>`;
+    
+    // Remove loading spinner if exists
+    const spinner = logsDiv.querySelector('.spinner-border');
+    if (spinner) {
+        spinner.parentElement.remove();
+    }
+    
+    logsDiv.appendChild(logEntry);
+    
+    // Auto-scroll to bottom
+    logsDiv.scrollTop = logsDiv.scrollHeight;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Stop polling when modal is closed
+document.getElementById('registrationProgressModal').addEventListener('hidden.bs.modal', function() {
+    if (registrationLogInterval) {
+        clearInterval(registrationLogInterval);
+        registrationLogInterval = null;
+        currentRegistrationSession = null;
+    }
+});
 </script>
 {% endblock %}
 

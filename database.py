@@ -172,6 +172,20 @@ class Database:
             )
         ''')
 
+        # Registration logs table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS registration_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT NOT NULL,
+                session_id TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                level TEXT DEFAULT 'info',
+                message TEXT NOT NULL,
+                details TEXT,
+                FOREIGN KEY (phone) REFERENCES registration_accounts (phone) ON DELETE CASCADE
+            )
+        ''')
+
         # Device presets table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS device_presets (
@@ -846,6 +860,52 @@ class Database:
         finally:
             conn.close()
 
+    # Registration logs operations
+    def add_registration_log(self, phone: str, message: str, level: str = 'info', session_id: str = None, details: str = None):
+        """Add log entry for registration process"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT INTO registration_logs (phone, session_id, level, message, details)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (phone, session_id, level, message, details))
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            print(f"Error adding registration log: {e}")
+            conn.rollback()
+            return None
+        finally:
+            conn.close()
+
+    def get_registration_logs(self, phone: str, session_id: str = None, limit: int = 100) -> List[Dict]:
+        """Get registration logs for a phone number"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            if session_id:
+                cursor.execute('''
+                    SELECT * FROM registration_logs 
+                    WHERE phone = ? AND session_id = ?
+                    ORDER BY timestamp ASC
+                    LIMIT ?
+                ''', (phone, session_id, limit))
+            else:
+                cursor.execute('''
+                    SELECT * FROM registration_logs 
+                    WHERE phone = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                ''', (phone, limit))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Error getting registration logs: {e}")
+            return []
+        finally:
+            conn.close()
+
     # Registration accounts operations
     def add_registration_account(self, phone: str) -> bool:
         """Add new phone number for registration"""
@@ -968,50 +1028,6 @@ class Database:
             print(f"Error adding registration proxy: {e}")
             conn.rollback()
             return None
-        finally:
-            conn.close()
-
-    def add_registration_proxies_bulk(self, proxies: List[Dict]) -> int:
-        """Add multiple registration proxies at once"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        added_count = 0
-        try:
-            for proxy in proxies:
-                # Generate name from host and username
-                name = f"{proxy.get('host', 'unknown')} - {proxy.get('username', 'unknown')[:8]}"
-                
-                cursor.execute('''
-                    INSERT INTO registration_proxies 
-                    (name, type, provider, host, port, username, password, protocol, 
-                     session_type, rotation_interval, country, exclude_countries, 
-                     total_gb_purchased, notes, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    name,
-                    'mobile',  # Default type
-                    'dataimpulse',  # Default provider
-                    proxy.get('host'),
-                    proxy.get('port'),
-                    proxy.get('username'),
-                    proxy.get('password'),
-                    'http',  # DataImpulse uses HTTP
-                    'rotating',
-                    20,
-                    None,
-                    None,
-                    0,  # No traffic limit tracking
-                    None,
-                    'active'
-                ))
-                added_count += 1
-            
-            conn.commit()
-            return added_count
-        except Exception as e:
-            print(f"Error adding registration proxies: {e}")
-            conn.rollback()
-            return 0
         finally:
             conn.close()
 
