@@ -510,9 +510,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -743,15 +743,15 @@ def new_campaign():
             account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
             if account:
                 account_id = account.get('id')
-                # Generate new ID: acc_{phone}_{campaign_id}
+                    # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
-                
-                # Update account with new ID and campaign_id
-                sheets_manager.update_account(account_id, {
-                    'new_id': new_account_id,
-                    'campaign_id': campaign_id
-                })
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    
+                    # Update account with new ID and campaign_id
+                    sheets_manager.update_account(account_id, {
+                        'new_id': new_account_id,
+                        'campaign_id': campaign_id
+                    })
 
         flash('Campaign created! Starting...', 'success')
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
@@ -1208,7 +1208,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-                acc['rate_limits'] = stats
+        acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
@@ -2228,9 +2228,16 @@ def start_registration():
             storage_dir.mkdir(parents=True, exist_ok=True)
             session_file = storage_dir / f'temp_{session_id}'
             
+            # Log: Starting registration
+            db.add_registration_log(phone, 'Starting registration process...', 'info', session_id)
+            
             # Prepare proxy config if available
             proxy_config = None
+            proxy_info = None
             if proxy:
+                proxy_info = f"{proxy['host']}:{proxy['port']}"
+                db.add_registration_log(phone, f'Selected proxy: {proxy.get("name", "Unknown")} ({proxy_info})', 'info', session_id)
+                
                 import socks
                 if proxy['protocol'] == 'socks5':
                     proxy_config = (
@@ -2251,6 +2258,12 @@ def start_registration():
                         proxy['username'],
                         proxy['password']
                     )
+            else:
+                db.add_registration_log(phone, 'No proxy configured, using direct connection', 'warning', session_id)
+            
+            # Log: Creating Telegram client
+            device_info = f"{device.get('device_model', 'Unknown')} ({device.get('system_version', 'Unknown')})"
+            db.add_registration_log(phone, f'Creating Telegram client with device: {device_info}', 'info', session_id)
             
             # Create client with device fingerprint and proxy
             client = TelegramClient(
@@ -2266,16 +2279,34 @@ def start_registration():
             )
             
             try:
+                # Log: Connecting to Telegram
+                if proxy:
+                    db.add_registration_log(phone, f'Connecting to Telegram via proxy {proxy_info}...', 'info', session_id)
+                else:
+                    db.add_registration_log(phone, 'Connecting to Telegram...', 'info', session_id)
+                
                 await client.connect()
                 
+                if proxy:
+                    db.add_registration_log(phone, f'✓ Connected via proxy {proxy_info}', 'success', session_id)
+                else:
+                    db.add_registration_log(phone, '✓ Connected to Telegram', 'success', session_id)
+                
                 # Check if already authorized
+                db.add_registration_log(phone, 'Checking account authorization status...', 'info', session_id)
                 if await client.is_user_authorized():
                     await client.disconnect()
+                    db.add_registration_log(phone, '✗ Account already registered', 'error', session_id)
                     return {'success': False, 'error': 'Account already registered'}
                 
+                db.add_registration_log(phone, '✓ Account not registered, proceeding...', 'success', session_id)
+                
                 # Send code
+                db.add_registration_log(phone, f'Sending SMS code request to {phone}...', 'info', session_id)
                 result = await client.send_code_request(phone)
                 phone_code_hash = result.phone_code_hash
+                
+                db.add_registration_log(phone, '✓ SMS code sent successfully! Please check your phone.', 'success', session_id)
                 
                 # Store session info
                 registration_sessions[phone] = {
@@ -2324,13 +2355,18 @@ def start_registration():
                 
             except PhoneNumberInvalidError:
                 await client.disconnect()
+                db.add_registration_log(phone, '✗ Invalid phone number', 'error', session_id)
                 return {'success': False, 'error': 'Invalid phone number'}
             except FloodWaitError as e:
                 await client.disconnect()
-                return {'success': False, 'error': f'Flood wait: please try again after {e.seconds} seconds'}
+                error_msg = f'Flood wait: please try again after {e.seconds} seconds'
+                db.add_registration_log(phone, f'✗ {error_msg}', 'error', session_id)
+                return {'success': False, 'error': error_msg}
             except Exception as e:
                 await client.disconnect()
-                return {'success': False, 'error': str(e)}
+                error_msg = str(e)
+                db.add_registration_log(phone, f'✗ Error: {error_msg}', 'error', session_id)
+                return {'success': False, 'error': error_msg}
         
         result = asyncio.run(send_code())
         return jsonify(result)
