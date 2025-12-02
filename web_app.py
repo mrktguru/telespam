@@ -2250,6 +2250,7 @@ def resend_registration_code():
             return jsonify({'success': False, 'error': 'Phone not found'}), 404
         
         # Check if account is in a state where resend is possible
+        # Allow resend for new, code_sent, waiting_code, and error statuses
         if account['status'] not in ['new', 'code_sent', 'waiting_code', 'error']:
             return jsonify({'success': False, 'error': 'Cannot resend code for this account status'}), 400
         

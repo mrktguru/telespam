@@ -134,7 +134,14 @@ function getCheckBadge(checkStatus, checkMessage) {
 
 function getActionCell(acc) {
     if (acc.status === 'new') {
-        return `<button class="btn btn-sm btn-primary" onclick="startRegistration('${acc.phone}')">Start</button>`;
+        return `
+            <div class="d-flex flex-column gap-2">
+                <button class="btn btn-sm btn-primary" onclick="startRegistration('${acc.phone}')">Start</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="resendCode('${acc.phone}')" title="Resend SMS code">
+                    <i class="bi bi-arrow-clockwise"></i> Resend Code
+                </button>
+            </div>
+        `;
     } else if (acc.status === 'code_sent' || acc.status === 'waiting_code') {
         return `
             <div class="d-flex flex-column gap-2">
@@ -269,23 +276,36 @@ async function resendCode(phone) {
         return;
     }
     
-    try {
-        const response = await fetch('/api/registration/resend-code', {
+    // Find and disable the button
+    const buttons = document.querySelectorAll(`button[onclick*="resendCode('${phone}')"]`);
+    buttons.forEach(button => {
+        const originalText = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<i class="bi bi-hourglass-split"></i> Sending...';
+        
+        // Re-enable after request completes
+        fetch('/api/registration/resend-code', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({phone})
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                alert('Code resent to ' + phone + '. Please check your Telegram app.');
+                loadAccounts();
+            } else {
+                alert('Error: ' + (result.error || result.message || 'Failed to resend code'));
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        })
+        .catch(error => {
+            alert('Error: ' + error.message);
+            button.innerHTML = originalText;
+            button.disabled = false;
         });
-        
-        const result = await response.json();
-        if (result.success) {
-            alert('Code resent to ' + phone + '. Please check your Telegram app.');
-            loadAccounts();
-        } else {
-            alert('Error: ' + (result.error || result.message || 'Failed to resend code'));
-        }
-    } catch (error) {
-        alert('Error: ' + error.message);
-    }
+    });
 }
 
 async function checkAccount(phone) {
