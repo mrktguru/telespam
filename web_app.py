@@ -2234,6 +2234,98 @@ def start_registration():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
+@app.route('/api/registration/resend-code', methods=['POST'])
+@login_required
+def resend_registration_code():
+    """Resend verification code to phone"""
+    try:
+        data = request.get_json()
+        phone = data.get('phone', '').strip()
+        
+        if not phone:
+            return jsonify({'success': False, 'error': 'Phone number is required'}), 400
+        
+        account = db.get_registration_account(phone)
+        if not account:
+            return jsonify({'success': False, 'error': 'Phone not found'}), 404
+        
+        # Check if account is in a state where resend is possible
+        # Allow resend for new, code_sent, waiting_code, and error statuses
+        if account['status'] not in ['new', 'code_sent', 'waiting_code', 'error']:
+            return jsonify({'success': False, 'error': 'Cannot resend code for this account status'}), 400
+        
+        import asyncio
+        from telethon import TelegramClient
+        from telethon.errors import PhoneNumberInvalidError, FloodWaitError
+        import config
+        import uuid
+        
+        async def resend_code():
+            phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
+            storage_dir = Path(__file__).parent / 'storage' / phone_clean
+            storage_dir.mkdir(parents=True, exist_ok=True)
+            
+            # If session exists, disconnect it first
+            if phone in registration_sessions:
+                try:
+                    old_client = registration_sessions[phone]['client']
+                    await old_client.disconnect()
+                except:
+                    pass
+                del registration_sessions[phone]
+            
+            # Create new temporary session for registration
+            session_id = str(uuid.uuid4())
+            session_file = storage_dir / f'temp_{session_id}'
+            
+            client = TelegramClient(str(session_file.with_suffix('')), config.API_ID, config.API_HASH)
+            
+            try:
+                await client.connect()
+                
+                # Check if already authorized
+                if await client.is_user_authorized():
+                    await client.disconnect()
+                    return {'success': False, 'error': 'Account already registered'}
+                
+                # Send code
+                result = await client.send_code_request(phone)
+                phone_code_hash = result.phone_code_hash
+                
+                # Store session info
+                registration_sessions[phone] = {
+                    'client': client,
+                    'session_file': session_file,
+                    'phone_code_hash': phone_code_hash,
+                    'session_id': session_id
+                }
+                
+                # Update status
+                db.update_registration_account(phone, {
+                    'status': 'code_sent',
+                    'session_id': session_id,
+                    'error_message': None  # Clear any previous errors
+                })
+                
+                return {'success': True, 'session_id': session_id, 'message': 'Code resent to phone'}
+                
+            except PhoneNumberInvalidError:
+                await client.disconnect()
+                return {'success': False, 'error': 'Invalid phone number'}
+            except FloodWaitError as e:
+                await client.disconnect()
+                return {'success': False, 'error': f'Flood wait: please try again after {e.seconds} seconds'}
+            except Exception as e:
+                await client.disconnect()
+                return {'success': False, 'error': str(e)}
+        
+        result = asyncio.run(resend_code())
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
 @app.route('/api/registration/submit-code', methods=['POST'])
 @login_required
 def submit_registration_code():
