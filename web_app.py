@@ -744,8 +744,7 @@ def new_campaign():
             if account:
                 account_id = account.get('id')
                 # Generate new ID: acc_{phone}_{campaign_id}
-                # Generate new ID: acc_{phone}_{campaign_id}
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
                 new_account_id = f"acc_{phone_clean}_{campaign_id}"
                 
                 # Update account with new ID and campaign_id
@@ -1209,7 +1208,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-        acc['rate_limits'] = stats
+                acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
