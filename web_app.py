@@ -510,9 +510,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -743,12 +743,12 @@ def new_campaign():
             account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
             if account:
                 account_id = account.get('id')
-                # Generate new ID: acc_{phone}_{campaign_id}
+                    # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
                     
-                # Update account with new ID and campaign_id
-                sheets_manager.update_account(account_id, {
+                    # Update account with new ID and campaign_id
+                    sheets_manager.update_account(account_id, {
                         'new_id': new_account_id,
                         'campaign_id': campaign_id
                     })
@@ -1209,7 +1209,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-                acc['rate_limits'] = stats
+        acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
@@ -2165,6 +2165,9 @@ def start_registration():
     try:
         data = request.get_json()
         phone = data.get('phone', '').strip()
+        proxy_id = data.get('proxy_id')  # Optional: specific proxy ID
+        device_preset_id = data.get('device_preset_id')  # Optional: specific device preset ID
+        country_preference = data.get('country_preference')  # Optional: country preference
         
         if not phone:
             return jsonify({'success': False, 'error': 'Phone number is required'}), 400
@@ -2176,8 +2179,49 @@ def start_registration():
         import asyncio
         from telethon import TelegramClient
         from telethon.errors import PhoneNumberInvalidError, FloodWaitError
+        from telethon.tl.types import InputClientProxy
         import config
         import uuid
+        
+        # Select proxy
+        proxy = None
+        if proxy_id:
+            proxy = db.get_registration_proxy(proxy_id)
+        else:
+            # Auto-select proxy
+            proxies = db.get_all_registration_proxies()
+            available = [
+                p for p in proxies 
+                if p.get('status') == 'active' 
+                and (p.get('total_gb_purchased', 0) - p.get('total_gb_used', 0)) > 0.1
+            ]
+            if country_preference:
+                available = [p for p in available if p.get('country') == country_preference or p.get('country') is None]
+            if available:
+                type_priority = {'mobile': 1, 'residential': 2, 'datacenter': 3}
+                available.sort(key=lambda x: (
+                    type_priority.get(x.get('type', 'datacenter'), 3),
+                    x.get('registrations_count', 0)
+                ))
+                proxy = available[0]
+        
+        # Select device preset
+        device = None
+        if device_preset_id:
+            presets = db.get_all_device_presets()
+            device = next((p for p in presets if p.get('id') == device_preset_id), None)
+        else:
+            # Auto-select random device
+            device = db.get_random_device_preset()
+        
+        if not device:
+            device = {
+                'device_model': 'Unknown',
+                'system_version': 'Unknown',
+                'app_version': '9.4.0',
+                'lang_code': 'en',
+                'system_lang_code': 'en-US'
+            }
         
         async def send_code():
             # Create temporary session for registration
@@ -2187,7 +2231,42 @@ def start_registration():
             storage_dir.mkdir(parents=True, exist_ok=True)
             session_file = storage_dir / f'temp_{session_id}'
             
-            client = TelegramClient(str(session_file.with_suffix('')), config.API_ID, config.API_HASH)
+            # Prepare proxy config if available
+            proxy_config = None
+            if proxy:
+                import socks
+                if proxy['protocol'] == 'socks5':
+                    proxy_config = (
+                        socks.SOCKS5,
+                        proxy['host'],
+                        proxy['port'],
+                        True,  # rdns
+                        proxy['username'],
+                        proxy['password']
+                    )
+                else:
+                    # HTTP/HTTPS proxy
+                    proxy_config = (
+                        socks.HTTP,
+                        proxy['host'],
+                        proxy['port'],
+                        True,  # rdns
+                        proxy['username'],
+                        proxy['password']
+                    )
+            
+            # Create client with device fingerprint and proxy
+            client = TelegramClient(
+                str(session_file.with_suffix('')),
+                config.API_ID,
+                config.API_HASH,
+                device_model=device.get('device_model', 'Unknown'),
+                system_version=device.get('system_version', 'Unknown'),
+                app_version=device.get('app_version', '9.4.0'),
+                lang_code=device.get('lang_code', 'en'),
+                system_lang_code=device.get('system_lang_code', 'en-US'),
+                proxy=proxy_config
+            )
             
             try:
                 await client.connect()
@@ -2209,13 +2288,37 @@ def start_registration():
                     'session_id': session_id
                 }
                 
-                # Update status
-                db.update_registration_account(phone, {
+                # Update status with proxy and device info
+                updates = {
                     'status': 'code_sent',
                     'session_id': session_id
-                })
+                }
+                if proxy:
+                    updates['proxy_id'] = proxy['id']
+                if device:
+                    updates['device_model'] = device.get('device_model')
+                    updates['system_version'] = device.get('system_version')
+                    updates['app_version'] = device.get('app_version')
+                    updates['lang_code'] = device.get('lang_code')
                 
-                return {'success': True, 'session_id': session_id, 'message': 'Code sent to phone'}
+                db.update_registration_account(phone, updates)
+                
+                return {
+                    'success': True,
+                    'session_id': session_id,
+                    'message': 'Code sent to phone',
+                    'proxy_used': {
+                        'id': proxy['id'],
+                        'name': proxy['name'],
+                        'type': proxy['type']
+                    } if proxy else None,
+                    'device_used': {
+                        'id': device.get('id'),
+                        'name': device.get('name'),
+                        'model': device.get('device_model'),
+                        'system': device.get('system_version')
+                    } if device else None
+                }
                 
             except PhoneNumberInvalidError:
                 await client.disconnect()
@@ -2274,11 +2377,69 @@ def resend_registration_code():
                     pass
                 del registration_sessions[phone]
             
+            # Get proxy and device from account if available
+            proxy = None
+            device = None
+            if account.get('proxy_id'):
+                proxy = db.get_registration_proxy(account['proxy_id'])
+            if account.get('device_model'):
+                device = {
+                    'device_model': account.get('device_model'),
+                    'system_version': account.get('system_version', 'Unknown'),
+                    'app_version': account.get('app_version', '9.4.0'),
+                    'lang_code': account.get('lang_code', 'en'),
+                    'system_lang_code': account.get('lang_code', 'en') + '-US'
+                }
+            else:
+                # Auto-select device if not set
+                device = db.get_random_device_preset()
+                if not device:
+                    device = {
+                        'device_model': 'Unknown',
+                        'system_version': 'Unknown',
+                        'app_version': '9.4.0',
+                        'lang_code': 'en',
+                        'system_lang_code': 'en-US'
+                    }
+            
+            # Prepare proxy config if available
+            proxy_config = None
+            if proxy:
+                import socks
+                if proxy['protocol'] == 'socks5':
+                    proxy_config = (
+                        socks.SOCKS5,
+                        proxy['host'],
+                        proxy['port'],
+                        True,  # rdns
+                        proxy['username'],
+                        proxy['password']
+                    )
+                else:
+                    proxy_config = (
+                        socks.HTTP,
+                        proxy['host'],
+                        proxy['port'],
+                        True,  # rdns
+                        proxy['username'],
+                        proxy['password']
+                    )
+            
             # Create new temporary session for registration
             session_id = str(uuid.uuid4())
             session_file = storage_dir / f'temp_{session_id}'
             
-            client = TelegramClient(str(session_file.with_suffix('')), config.API_ID, config.API_HASH)
+            client = TelegramClient(
+                str(session_file.with_suffix('')),
+                config.API_ID,
+                config.API_HASH,
+                device_model=device.get('device_model', 'Unknown'),
+                system_version=device.get('system_version', 'Unknown'),
+                app_version=device.get('app_version', '9.4.0'),
+                lang_code=device.get('lang_code', 'en'),
+                system_lang_code=device.get('system_lang_code', 'en-US'),
+                proxy=proxy_config
+            )
             
             try:
                 await client.connect()
@@ -2395,6 +2556,21 @@ def submit_registration_code():
                     'session_path': str(final_session),
                     'tdata_path': tdata_path
                 })
+                
+                # Update proxy statistics
+                account = db.get_registration_account(phone)
+                if account and account.get('proxy_id'):
+                    proxy = db.get_registration_proxy(account['proxy_id'])
+                    if proxy:
+                        # Estimate traffic used: ~0.09 MB per registration
+                        traffic_used_mb = 0.09
+                        traffic_used_gb = traffic_used_mb / 1024
+                        
+                        db.update_registration_proxy(account['proxy_id'], {
+                            'total_gb_used': proxy.get('total_gb_used', 0) + traffic_used_gb,
+                            'registrations_count': proxy.get('registrations_count', 0) + 1,
+                            'last_used': datetime.now().isoformat()
+                        })
                 
                 # Clean up temp session
                 try:
@@ -2629,6 +2805,216 @@ def download_registration_session(phone):
     except Exception as e:
         flash(f'Error: {str(e)}', 'danger')
         return redirect(url_for('create_accounts'))
+
+
+# ============================================================================
+# PROXY MANAGEMENT API
+# ============================================================================
+
+@app.route('/api/registration/proxies')
+@login_required
+def get_registration_proxies():
+    """Get all registration proxies"""
+    proxies = db.get_all_registration_proxies()
+    # Calculate remaining traffic
+    for proxy in proxies:
+        proxy['traffic_remaining_gb'] = proxy.get('total_gb_purchased', 0) - proxy.get('total_gb_used', 0)
+    return jsonify(proxies)
+
+
+@app.route('/api/registration/proxies/add', methods=['POST'])
+@login_required
+def add_registration_proxy():
+    """Add new registration proxy"""
+    try:
+        data = request.get_json()
+        proxy_id = db.add_registration_proxy(data)
+        if proxy_id:
+            return jsonify({'success': True, 'proxy_id': proxy_id, 'message': 'Proxy added successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to add proxy'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/registration/proxies/<int:proxy_id>', methods=['PUT'])
+@login_required
+def update_registration_proxy(proxy_id):
+    """Update registration proxy"""
+    try:
+        data = request.get_json()
+        success = db.update_registration_proxy(proxy_id, data)
+        if success:
+            return jsonify({'success': True, 'message': 'Proxy updated successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Proxy not found'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/registration/proxies/<int:proxy_id>', methods=['DELETE'])
+@login_required
+def delete_registration_proxy(proxy_id):
+    """Delete registration proxy"""
+    try:
+        success = db.delete_registration_proxy(proxy_id)
+        if success:
+            return jsonify({'success': True, 'message': 'Proxy deleted successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Proxy not found'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/registration/proxies/test', methods=['POST'])
+@login_required
+def test_registration_proxy():
+    """Test proxy connection"""
+    try:
+        data = request.get_json()
+        proxy_id = data.get('proxy_id')
+        
+        if not proxy_id:
+            return jsonify({'success': False, 'error': 'Proxy ID is required'}), 400
+        
+        proxy = db.get_registration_proxy(proxy_id)
+        if not proxy:
+            return jsonify({'success': False, 'error': 'Proxy not found'}), 404
+        
+        import asyncio
+        import aiohttp
+        
+        async def test_connection():
+            try:
+                # Prepare proxy URL
+                if proxy['protocol'] == 'socks5':
+                    proxy_url = f"socks5://{proxy['username']}:{proxy['password']}@{proxy['host']}:{proxy['port']}"
+                else:
+                    proxy_url = f"{proxy['protocol']}://{proxy['username']}:{proxy['password']}@{proxy['host']}:{proxy['port']}"
+                
+                # Test connection
+                async with aiohttp.ClientSession() as session:
+                    async with session.get('https://api.ipify.org?format=json', proxy=proxy_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                        if response.status == 200:
+                            ip_data = await response.json()
+                            return {
+                                'success': True,
+                                'test_results': {
+                                    'connection': 'OK',
+                                    'ip_address': ip_data.get('ip', 'Unknown'),
+                                    'country': 'Unknown',  # Would need geoip service
+                                    'type': proxy['type'],
+                                    'speed_mbps': None,
+                                    'latency_ms': None
+                                }
+                            }
+                        else:
+                            return {'success': False, 'error': f'HTTP {response.status}'}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+        
+        result = asyncio.run(test_connection())
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/registration/proxies/select', methods=['POST'])
+@login_required
+def select_proxy_for_registration():
+    """Select optimal proxy for registration"""
+    try:
+        data = request.get_json()
+        country_preference = data.get('country_preference')
+        type_preference = data.get('type_preference')
+        
+        proxies = db.get_all_registration_proxies()
+        
+        # Filter active proxies with traffic
+        available = [
+            p for p in proxies 
+            if p.get('status') == 'active' 
+            and (p.get('total_gb_purchased', 0) - p.get('total_gb_used', 0)) > 0.1
+        ]
+        
+        if not available:
+            return jsonify({'success': False, 'error': 'No available proxies'}), 400
+        
+        # Filter by type preference
+        if type_preference:
+            available = [p for p in available if p.get('type') == type_preference]
+        
+        # Filter by country preference
+        if country_preference:
+            available = [p for p in available if p.get('country') == country_preference or p.get('country') is None]
+        
+        if not available:
+            return jsonify({'success': False, 'error': 'No proxies match preferences'}), 400
+        
+        # Sort by type priority (mobile > residential > datacenter) and registrations count
+        type_priority = {'mobile': 1, 'residential': 2, 'datacenter': 3}
+        available.sort(key=lambda x: (
+            type_priority.get(x.get('type', 'datacenter'), 3),
+            x.get('registrations_count', 0)
+        ))
+        
+        selected = available[0]
+        return jsonify({
+            'success': True,
+            'proxy_id': selected['id'],
+            'proxy_name': selected['name'],
+            'estimated_ip': 'rotating' if selected.get('session_type') == 'rotating' else 'sticky',
+            'traffic_remaining_gb': selected.get('total_gb_purchased', 0) - selected.get('total_gb_used', 0)
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+# ============================================================================
+# DEVICE PRESETS API
+# ============================================================================
+
+@app.route('/api/registration/device-presets')
+@login_required
+def get_device_presets():
+    """Get all device presets"""
+    enabled_only = request.args.get('enabled_only', 'false').lower() == 'true'
+    presets = db.get_all_device_presets(enabled_only=enabled_only)
+    return jsonify(presets)
+
+
+@app.route('/api/registration/device-presets/random', methods=['POST'])
+@login_required
+def get_random_device_preset():
+    """Get random device preset"""
+    try:
+        data = request.get_json() or {}
+        system_type = data.get('system_type')
+        
+        device = db.get_random_device_preset(system_type=system_type)
+        if device:
+            return jsonify({'success': True, 'device': device})
+        else:
+            return jsonify({'success': False, 'error': 'No device presets available'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/registration/device-presets/add', methods=['POST'])
+@login_required
+def add_device_preset():
+    """Add custom device preset"""
+    try:
+        data = request.get_json()
+        device_id = db.add_device_preset(data)
+        if device_id:
+            return jsonify({'success': True, 'device_id': device_id, 'message': 'Device preset added successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to add device preset'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
 
 
 @app.route('/api/registration/delete-account/<phone>', methods=['DELETE'])
