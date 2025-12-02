@@ -510,9 +510,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -3078,6 +3078,18 @@ def add_device_preset():
             return jsonify({'success': False, 'error': 'Failed to add device preset'}), 400
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/registration/logs/<phone>')
+@login_required
+def get_registration_logs(phone):
+    """Get registration logs for a phone number"""
+    try:
+        session_id = request.args.get('session_id')
+        logs = db.get_registration_logs(phone, session_id=session_id)
+        return jsonify(logs)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 
 @app.route('/api/registration/delete-account/<phone>', methods=['DELETE'])
