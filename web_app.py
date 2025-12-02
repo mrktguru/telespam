@@ -2837,6 +2837,31 @@ def add_registration_proxy():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
+@app.route('/api/registration/proxies/add-bulk', methods=['POST'])
+@login_required
+def add_registration_proxies_bulk():
+    """Add multiple registration proxies at once"""
+    try:
+        data = request.get_json()
+        proxies = data.get('proxies', [])
+        
+        if not proxies:
+            return jsonify({'success': False, 'error': 'No proxies provided'}), 400
+        
+        added_count = db.add_registration_proxies_bulk(proxies)
+        
+        if added_count > 0:
+            return jsonify({
+                'success': True,
+                'added_count': added_count,
+                'message': f'Successfully added {added_count} proxy/proxies'
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Failed to add proxies'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
 @app.route('/api/registration/proxies/<int:proxy_id>', methods=['PUT'])
 @login_required
 def update_registration_proxy(proxy_id):

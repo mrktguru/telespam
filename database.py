@@ -971,6 +971,50 @@ class Database:
         finally:
             conn.close()
 
+    def add_registration_proxies_bulk(self, proxies: List[Dict]) -> int:
+        """Add multiple registration proxies at once"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        added_count = 0
+        try:
+            for proxy in proxies:
+                # Generate name from host and username
+                name = f"{proxy.get('host', 'unknown')} - {proxy.get('username', 'unknown')[:8]}"
+                
+                cursor.execute('''
+                    INSERT INTO registration_proxies 
+                    (name, type, provider, host, port, username, password, protocol, 
+                     session_type, rotation_interval, country, exclude_countries, 
+                     total_gb_purchased, notes, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    name,
+                    'mobile',  # Default type
+                    'dataimpulse',  # Default provider
+                    proxy.get('host'),
+                    proxy.get('port'),
+                    proxy.get('username'),
+                    proxy.get('password'),
+                    'http',  # DataImpulse uses HTTP
+                    'rotating',
+                    20,
+                    None,
+                    None,
+                    0,  # No traffic limit tracking
+                    None,
+                    'active'
+                ))
+                added_count += 1
+            
+            conn.commit()
+            return added_count
+        except Exception as e:
+            print(f"Error adding registration proxies: {e}")
+            conn.rollback()
+            return 0
+        finally:
+            conn.close()
+
     def get_all_registration_proxies(self) -> List[Dict]:
         """Get all registration proxies"""
         conn = self.get_connection()
