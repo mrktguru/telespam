@@ -2293,6 +2293,11 @@ def start_registration():
                 }
                 if proxy:
                     updates['proxy_id'] = proxy['id']
+                    # Update proxy last_used timestamp for round-robin
+                    from datetime import datetime
+                    db.update_registration_proxy(proxy['id'], {
+                        'last_used': datetime.now().isoformat()
+                    })
                 if device:
                     updates['device_model'] = device.get('device_model')
                     updates['system_version'] = device.get('system_version')
