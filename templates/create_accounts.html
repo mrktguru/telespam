@@ -137,16 +137,28 @@ function getActionCell(acc) {
         return `<button class="btn btn-sm btn-primary" onclick="startRegistration('${acc.phone}')">Start</button>`;
     } else if (acc.status === 'code_sent' || acc.status === 'waiting_code') {
         return `
-            <div class="d-flex gap-2">
-                <input type="text" class="form-control form-control-sm" id="code-${acc.phone}" 
-                       placeholder="Code" maxlength="5" style="width: 80px;">
-                <button class="btn btn-sm btn-success" onclick="submitCode('${acc.phone}')">Submit</button>
+            <div class="d-flex flex-column gap-2">
+                <div class="d-flex gap-2">
+                    <input type="text" class="form-control form-control-sm" id="code-${acc.phone}" 
+                           placeholder="Code" maxlength="5" style="width: 80px;">
+                    <button class="btn btn-sm btn-success" onclick="submitCode('${acc.phone}')">Submit</button>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" onclick="resendCode('${acc.phone}')" title="Resend SMS code">
+                    <i class="bi bi-arrow-clockwise"></i> Resend Code
+                </button>
             </div>
         `;
     } else if (acc.status === 'registered') {
         return '<span class="text-muted">-</span>';
     } else if (acc.status === 'error') {
-        return `<small class="text-danger">${acc.error_message || 'Error'}</small>`;
+        return `
+            <div class="d-flex flex-column gap-2">
+                <small class="text-danger">${acc.error_message || 'Error'}</small>
+                <button class="btn btn-sm btn-outline-primary" onclick="resendCode('${acc.phone}')" title="Try again - resend SMS code">
+                    <i class="bi bi-arrow-clockwise"></i> Resend Code
+                </button>
+            </div>
+        `;
     }
     return '-';
 }
@@ -243,9 +255,33 @@ async function submitCode(phone) {
             if (result.error === 'PhoneCodeExpiredError') {
                 // Offer to resend code
                 if (confirm('Code expired. Would you like to request a new code?')) {
-                    startRegistration(phone);
+                    resendCode(phone);
                 }
             }
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function resendCode(phone) {
+    if (!confirm(`Resend SMS code to ${phone}?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/registration/resend-code', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({phone})
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('Code resent to ' + phone + '. Please check your Telegram app.');
+            loadAccounts();
+        } else {
+            alert('Error: ' + (result.error || result.message || 'Failed to resend code'));
         }
     } catch (error) {
         alert('Error: ' + error.message);
