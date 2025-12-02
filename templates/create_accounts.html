@@ -615,31 +615,29 @@ function renderProxiesTable(proxies) {
     }
     
     tbody.innerHTML = proxies.map(proxy => {
-        const trafficUsed = proxy.total_gb_used || 0;
-        const trafficTotal = proxy.total_gb_purchased || 0;
-        const trafficRemaining = trafficTotal - trafficUsed;
-        const trafficPercent = trafficTotal > 0 ? (trafficUsed / trafficTotal * 100).toFixed(1) : 0;
-        
         const statusBadge = proxy.status === 'active' 
             ? '<span class="badge bg-success">Active</span>'
             : proxy.status === 'limited'
             ? '<span class="badge bg-warning">Limited</span>'
             : '<span class="badge bg-danger">Disabled</span>';
         
+        const proxyString = `${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`;
+        const lastUsed = proxy.last_used ? new Date(proxy.last_used).toLocaleString() : 'Never';
+        
         return `
             <tr>
-                <td><strong>${proxy.name}</strong></td>
-                <td><span class="badge bg-info">${proxy.type}</span></td>
-                <td>${proxy.provider}</td>
-                <td>
-                    <small>${trafficUsed.toFixed(2)} / ${trafficTotal.toFixed(2)} GB</small><br>
-                    <small class="text-muted">${trafficRemaining.toFixed(2)} GB left (${trafficPercent}%)</small>
-                </td>
+                <td><strong>${proxy.name || proxyString}</strong></td>
+                <td><code class="small">${proxy.host}:${proxy.port}</code></td>
+                <td><small>${proxy.username}</small></td>
                 <td>${proxy.registrations_count || 0}</td>
+                <td><small class="text-muted">${lastUsed}</small></td>
                 <td>${statusBadge}</td>
                 <td>
                     <button class="btn btn-sm btn-outline-primary" onclick="testProxy(${proxy.id})" title="Test proxy">
                         <i class="bi bi-check-circle"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="copyProxyString('${proxyString.replace(/'/g, "\\'")}')" title="Copy proxy string">
+                        <i class="bi bi-clipboard"></i>
                     </button>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteProxy(${proxy.id})" title="Delete proxy">
                         <i class="bi bi-trash"></i>
@@ -648,6 +646,21 @@ function renderProxiesTable(proxies) {
             </tr>
         `;
     }).join('');
+}
+
+function copyProxyString(proxyString) {
+    navigator.clipboard.writeText(proxyString).then(() => {
+        alert('Proxy string copied to clipboard!');
+    }).catch(() => {
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = proxyString;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        alert('Proxy string copied to clipboard!');
+    });
 }
 
 async function loadDevices() {
