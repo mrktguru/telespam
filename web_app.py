@@ -510,7 +510,7 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-        # Mark as completed
+            # Mark as completed
             db.update_campaign(campaign_id, status='completed')
             db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
@@ -752,7 +752,6 @@ def new_campaign():
                     'new_id': new_account_id,
                     'campaign_id': campaign_id
                 })
-                print(f"✓ Assigned campaign {campaign_id} to account {account_id} ({phone}) → {new_account_id}")
 
         flash('Campaign created! Starting...', 'success')
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
@@ -2183,25 +2182,23 @@ def start_registration():
         import config
         import uuid
         
-        # Select proxy
+        # Select proxy (round-robin)
         proxy = None
         if proxy_id:
             proxy = db.get_registration_proxy(proxy_id)
         else:
-            # Auto-select proxy
+            # Auto-select proxy using round-robin (least recently used)
             proxies = db.get_all_registration_proxies()
             available = [
                 p for p in proxies 
-                if p.get('status') == 'active' 
-                and (p.get('total_gb_purchased', 0) - p.get('total_gb_used', 0)) > 0.1
+                if p.get('status') == 'active'
             ]
-            if country_preference:
-                available = [p for p in available if p.get('country') == country_preference or p.get('country') is None]
+            
             if available:
-                type_priority = {'mobile': 1, 'residential': 2, 'datacenter': 3}
+                # Sort by last_used (NULL first, then by datetime) - round-robin
                 available.sort(key=lambda x: (
-                    type_priority.get(x.get('type', 'datacenter'), 3),
-                    x.get('registrations_count', 0)
+                    x.get('last_used') is None,  # NULL values first
+                    x.get('last_used') or ''  # Then by datetime
                 ))
                 proxy = available[0]
         
@@ -2295,6 +2292,11 @@ def start_registration():
                 }
                 if proxy:
                     updates['proxy_id'] = proxy['id']
+                    # Update proxy last_used timestamp for round-robin
+                    from datetime import datetime
+                    db.update_registration_proxy(proxy['id'], {
+                        'last_used': datetime.now().isoformat()
+                    })
                 if device:
                     updates['device_model'] = device.get('device_model')
                     updates['system_version'] = device.get('system_version')
@@ -2833,6 +2835,31 @@ def add_registration_proxy():
             return jsonify({'success': True, 'proxy_id': proxy_id, 'message': 'Proxy added successfully'})
         else:
             return jsonify({'success': False, 'error': 'Failed to add proxy'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/registration/proxies/add-bulk', methods=['POST'])
+@login_required
+def add_registration_proxies_bulk():
+    """Add multiple registration proxies at once"""
+    try:
+        data = request.get_json()
+        proxies = data.get('proxies', [])
+        
+        if not proxies:
+            return jsonify({'success': False, 'error': 'No proxies provided'}), 400
+        
+        added_count = db.add_registration_proxies_bulk(proxies)
+        
+        if added_count > 0:
+            return jsonify({
+                'success': True,
+                'added_count': added_count,
+                'message': f'Successfully added {added_count} proxy/proxies'
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Failed to add proxies'}), 400
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
 

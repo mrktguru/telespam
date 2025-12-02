@@ -80,10 +80,10 @@
                         <thead>
                             <tr>
                                 <th>Name</th>
-                                <th>Type</th>
-                                <th>Provider</th>
-                                <th>Traffic</th>
+                                <th>Host:Port</th>
+                                <th>Username</th>
                                 <th>Registrations</th>
+                                <th>Last Used</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -144,89 +144,25 @@
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Add Registration Proxy</h5>
+                <h5 class="modal-title">Add Proxies (DataImpulse)</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <form id="addProxyForm">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Name *</label>
-                            <input type="text" class="form-control" id="proxyName" required>
-                        </div>
-                        <div class="col-md-3 mb-3">
-                            <label class="form-label">Type *</label>
-                            <select class="form-select" id="proxyType" required>
-                                <option value="mobile">Mobile</option>
-                                <option value="residential">Residential</option>
-                                <option value="datacenter">Datacenter</option>
-                            </select>
-                        </div>
-                        <div class="col-md-3 mb-3">
-                            <label class="form-label">Provider *</label>
-                            <select class="form-select" id="proxyProvider" required onchange="fillProviderTemplate()">
-                                <option value="">Select...</option>
-                                <option value="dataimpulse">DataImpulse</option>
-                                <option value="smartproxy">Smartproxy</option>
-                                <option value="proxy6">Proxy6</option>
-                                <option value="other">Other</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Host *</label>
-                            <input type="text" class="form-control" id="proxyHost" required>
-                        </div>
-                        <div class="col-md-3 mb-3">
-                            <label class="form-label">Port *</label>
-                            <input type="number" class="form-control" id="proxyPort" required>
-                        </div>
-                        <div class="col-md-3 mb-3">
-                            <label class="form-label">Protocol *</label>
-                            <select class="form-select" id="proxyProtocol" required>
-                                <option value="socks5">SOCKS5</option>
-                                <option value="http">HTTP/HTTPS</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Username *</label>
-                            <input type="text" class="form-control" id="proxyUsername" required>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Password *</label>
-                            <input type="password" class="form-control" id="proxyPassword" required>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">Session Type</label>
-                            <select class="form-select" id="proxySessionType">
-                                <option value="rotating">Rotating</option>
-                                <option value="sticky">Sticky</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">Country (optional)</label>
-                            <input type="text" class="form-control" id="proxyCountry" placeholder="RU, US, DE...">
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">Total GB Purchased</label>
-                            <input type="number" step="0.1" class="form-control" id="proxyTotalGB" value="10">
-                        </div>
-                    </div>
                     <div class="mb-3">
-                        <label class="form-label">Notes</label>
-                        <textarea class="form-control" id="proxyNotes" rows="2"></textarea>
+                        <label class="form-label">Proxy List *</label>
+                        <textarea class="form-control" id="proxyList" rows="8" required 
+                                  placeholder="Enter proxies in format: login:password@host:port&#10;One proxy per line&#10;&#10;Example:&#10;a5ff68df07c427bb72f5:ace68e42d46ba57b@gw.dataimpulse.com:823&#10;b6ff68df07c427bb72f6:bce68e42d46ba57c@gw.dataimpulse.com:823"></textarea>
+                        <small class="text-muted">Format: <code>login:password@host:port</code> (one per line)</small>
+                    </div>
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> Proxies will be used in round-robin order during account registration.
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-outline-primary" onclick="testProxyConnection()">Test Connection</button>
-                <button type="button" class="btn btn-primary" onclick="saveProxy()">Save Proxy</button>
+                <button type="button" class="btn btn-primary" onclick="saveProxies()">Add Proxies</button>
             </div>
         </div>
     </div>
@@ -679,31 +615,29 @@ function renderProxiesTable(proxies) {
     }
     
     tbody.innerHTML = proxies.map(proxy => {
-        const trafficUsed = proxy.total_gb_used || 0;
-        const trafficTotal = proxy.total_gb_purchased || 0;
-        const trafficRemaining = trafficTotal - trafficUsed;
-        const trafficPercent = trafficTotal > 0 ? (trafficUsed / trafficTotal * 100).toFixed(1) : 0;
-        
         const statusBadge = proxy.status === 'active' 
             ? '<span class="badge bg-success">Active</span>'
             : proxy.status === 'limited'
             ? '<span class="badge bg-warning">Limited</span>'
             : '<span class="badge bg-danger">Disabled</span>';
         
+        const proxyString = `${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`;
+        const lastUsed = proxy.last_used ? new Date(proxy.last_used).toLocaleString() : 'Never';
+        
         return `
             <tr>
-                <td><strong>${proxy.name}</strong></td>
-                <td><span class="badge bg-info">${proxy.type}</span></td>
-                <td>${proxy.provider}</td>
-                <td>
-                    <small>${trafficUsed.toFixed(2)} / ${trafficTotal.toFixed(2)} GB</small><br>
-                    <small class="text-muted">${trafficRemaining.toFixed(2)} GB left (${trafficPercent}%)</small>
-                </td>
+                <td><strong>${proxy.name || proxyString}</strong></td>
+                <td><code class="small">${proxy.host}:${proxy.port}</code></td>
+                <td><small>${proxy.username}</small></td>
                 <td>${proxy.registrations_count || 0}</td>
+                <td><small class="text-muted">${lastUsed}</small></td>
                 <td>${statusBadge}</td>
                 <td>
                     <button class="btn btn-sm btn-outline-primary" onclick="testProxy(${proxy.id})" title="Test proxy">
                         <i class="bi bi-check-circle"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="copyProxyString('${proxyString.replace(/'/g, "\\'")}')" title="Copy proxy string">
+                        <i class="bi bi-clipboard"></i>
                     </button>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteProxy(${proxy.id})" title="Delete proxy">
                         <i class="bi bi-trash"></i>
@@ -712,6 +646,21 @@ function renderProxiesTable(proxies) {
             </tr>
         `;
     }).join('');
+}
+
+function copyProxyString(proxyString) {
+    navigator.clipboard.writeText(proxyString).then(() => {
+        alert('Proxy string copied to clipboard!');
+    }).catch(() => {
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = proxyString;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        alert('Proxy string copied to clipboard!');
+    });
 }
 
 async function loadDevices() {
@@ -767,69 +716,55 @@ function renderDevicesTable(devices) {
     }).join('');
 }
 
-function fillProviderTemplate() {
-    const provider = document.getElementById('proxyProvider').value;
-    const templates = {
-        'dataimpulse': {
-            host: 'gw.dataimpulse.com',
-            port: 10000,
-            protocol: 'socks5',
-            sessionType: 'rotating'
-        },
-        'smartproxy': {
-            host: 'gate.smartproxy.com',
-            port: 7000,
-            protocol: 'http',
-            sessionType: 'rotating'
-        },
-        'proxy6': {
-            host: 'proxy6.net',
-            port: 1500,
-            protocol: 'socks5',
-            sessionType: 'sticky'
-        }
-    };
+async function saveProxies() {
+    const proxyListText = document.getElementById('proxyList').value.trim();
     
-    if (templates[provider]) {
-        const t = templates[provider];
-        document.getElementById('proxyHost').value = t.host;
-        document.getElementById('proxyPort').value = t.port;
-        document.getElementById('proxyProtocol').value = t.protocol;
-        document.getElementById('proxySessionType').value = t.sessionType;
+    if (!proxyListText) {
+        alert('Please enter at least one proxy');
+        return;
     }
-}
-
-async function saveProxy() {
-    const proxyData = {
-        name: document.getElementById('proxyName').value,
-        type: document.getElementById('proxyType').value,
-        provider: document.getElementById('proxyProvider').value,
-        host: document.getElementById('proxyHost').value,
-        port: parseInt(document.getElementById('proxyPort').value),
-        username: document.getElementById('proxyUsername').value,
-        password: document.getElementById('proxyPassword').value,
-        protocol: document.getElementById('proxyProtocol').value,
-        session_type: document.getElementById('proxySessionType').value,
-        country: document.getElementById('proxyCountry').value || null,
-        total_gb_purchased: parseFloat(document.getElementById('proxyTotalGB').value) || 0,
-        notes: document.getElementById('proxyNotes').value || null
-    };
+    
+    // Parse proxy list: format is login:password@host:port (one per line)
+    const lines = proxyListText.split('\n').map(l => l.trim()).filter(l => l);
+    const proxies = [];
+    
+    for (const line of lines) {
+        // Parse format: login:password@host:port
+        const match = line.match(/^([^:]+):([^@]+)@([^:]+):(\d+)$/);
+        if (!match) {
+            alert(`Invalid proxy format: ${line}\nExpected format: login:password@host:port`);
+            return;
+        }
+        
+        const [, username, password, host, port] = match;
+        proxies.push({
+            username: username.trim(),
+            password: password.trim(),
+            host: host.trim(),
+            port: parseInt(port.trim())
+        });
+    }
+    
+    if (proxies.length === 0) {
+        alert('No valid proxies found');
+        return;
+    }
     
     try {
-        const response = await fetch('/api/registration/proxies/add', {
+        const response = await fetch('/api/registration/proxies/add-bulk', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(proxyData)
+            body: JSON.stringify({proxies: proxies})
         });
         
         const result = await response.json();
         if (result.success) {
-            alert('Proxy added successfully!');
+            alert(`Successfully added ${result.added_count} proxy/proxies!`);
             bootstrap.Modal.getInstance(document.getElementById('addProxyModal')).hide();
             document.getElementById('addProxyForm').reset();
             loadProxies();
         } else {
-            alert('Error: ' + (result.error || 'Failed to add proxy'));
+            alert('Error: ' + (result.error || 'Failed to add proxies'));
         }
     } catch (error) {
         alert('Error: ' + error.message);
