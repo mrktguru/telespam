@@ -230,6 +230,31 @@
     </div>
 </div>
 
+<!-- Registration Progress Modal -->
+<div class="modal fade" id="registrationProgressModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-phone"></i> Registration Progress: <span id="progressPhone"></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="closeProgressBtn" style="display: none;"></button>
+            </div>
+            <div class="modal-body">
+                <div id="registrationLogs" style="max-height: 500px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.85rem; background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 5px;">
+                    <div class="text-center text-muted py-3">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                        <span class="ms-2">Starting registration...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="cancelProgressBtn" style="display: none;">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
