@@ -15,28 +15,281 @@
     </div>
 </div>
 
-<div class="card">
-    <div class="card-body">
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th>Phone</th>
-                        <th>Registration Status</th>
-                        <th>Action</th>
-                        <th>Check Status</th>
-                        <th>Files</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="accountsTableBody">
-                    <tr>
-                        <td colspan="6" class="text-center text-muted">
-                            <i class="bi bi-hourglass-split"></i> Loading...
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+<!-- Tabs for Accounts, Proxies, and Device Presets -->
+<ul class="nav nav-tabs mb-3" id="createAccountsTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="accounts-tab" data-bs-toggle="tab" data-bs-target="#accounts" type="button" role="tab" style="color: #495057;">
+            <i class="bi bi-phone"></i> Accounts
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="proxies-tab" data-bs-toggle="tab" data-bs-target="#proxies" type="button" role="tab" style="color: #495057;">
+            <i class="bi bi-shield-lock"></i> Proxies
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="devices-tab" data-bs-toggle="tab" data-bs-target="#devices" type="button" role="tab" style="color: #495057;">
+            <i class="bi bi-device-hdd"></i> Device Presets
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="createAccountsTabContent">
+    <!-- Accounts Tab -->
+    <div class="tab-pane fade show active" id="accounts" role="tabpanel">
+        <div class="card">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Phone</th>
+                                <th>Registration Status</th>
+                                <th>Action</th>
+                                <th>Check Status</th>
+                                <th>Proxy/Device</th>
+                                <th>Files</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="accountsTableBody">
+                            <tr>
+                                <td colspan="7" class="text-center text-muted">
+                                    <i class="bi bi-hourglass-split"></i> Loading...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Proxies Tab -->
+    <div class="tab-pane fade" id="proxies" role="tabpanel">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="mb-0">Registration Proxies</h5>
+                    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addProxyModal">
+                        <i class="bi bi-plus-circle"></i> Add Proxy
+                    </button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Provider</th>
+                                <th>Traffic</th>
+                                <th>Registrations</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="proxiesTableBody">
+                            <tr>
+                                <td colspan="7" class="text-center text-muted">
+                                    <i class="bi bi-hourglass-split"></i> Loading...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Device Presets Tab -->
+    <div class="tab-pane fade" id="devices" role="tabpanel">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="mb-0">Device Presets</h5>
+                    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addDeviceModal">
+                        <i class="bi bi-plus-circle"></i> Add Device
+                    </button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Model</th>
+                                <th>System</th>
+                                <th>Version</th>
+                                <th>Language</th>
+                                <th>Weight</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="devicesTableBody">
+                            <tr>
+                                <td colspan="8" class="text-center text-muted">
+                                    <i class="bi bi-hourglass-split"></i> Loading...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Proxy Modal -->
+<div class="modal fade" id="addProxyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Registration Proxy</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addProxyForm">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Name *</label>
+                            <input type="text" class="form-control" id="proxyName" required>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">Type *</label>
+                            <select class="form-select" id="proxyType" required>
+                                <option value="mobile">Mobile</option>
+                                <option value="residential">Residential</option>
+                                <option value="datacenter">Datacenter</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">Provider *</label>
+                            <select class="form-select" id="proxyProvider" required onchange="fillProviderTemplate()">
+                                <option value="">Select...</option>
+                                <option value="dataimpulse">DataImpulse</option>
+                                <option value="smartproxy">Smartproxy</option>
+                                <option value="proxy6">Proxy6</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Host *</label>
+                            <input type="text" class="form-control" id="proxyHost" required>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">Port *</label>
+                            <input type="number" class="form-control" id="proxyPort" required>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">Protocol *</label>
+                            <select class="form-select" id="proxyProtocol" required>
+                                <option value="socks5">SOCKS5</option>
+                                <option value="http">HTTP/HTTPS</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Username *</label>
+                            <input type="text" class="form-control" id="proxyUsername" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Password *</label>
+                            <input type="password" class="form-control" id="proxyPassword" required>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Session Type</label>
+                            <select class="form-select" id="proxySessionType">
+                                <option value="rotating">Rotating</option>
+                                <option value="sticky">Sticky</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Country (optional)</label>
+                            <input type="text" class="form-control" id="proxyCountry" placeholder="RU, US, DE...">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Total GB Purchased</label>
+                            <input type="number" step="0.1" class="form-control" id="proxyTotalGB" value="10">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        <textarea class="form-control" id="proxyNotes" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-outline-primary" onclick="testProxyConnection()">Test Connection</button>
+                <button type="button" class="btn btn-primary" onclick="saveProxy()">Save Proxy</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Device Modal -->
+<div class="modal fade" id="addDeviceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Device Preset</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addDeviceForm">
+                    <div class="mb-3">
+                        <label class="form-label">Name *</label>
+                        <input type="text" class="form-control" id="deviceName" required>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Device Model *</label>
+                            <input type="text" class="form-control" id="deviceModel" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">System Type *</label>
+                            <select class="form-select" id="deviceSystemType" required>
+                                <option value="android">Android</option>
+                                <option value="ios">iOS</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">System Version *</label>
+                            <input type="text" class="form-control" id="deviceSystemVersion" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">App Version *</label>
+                            <input type="text" class="form-control" id="deviceAppVersion" required>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Language Code *</label>
+                            <input type="text" class="form-control" id="deviceLangCode" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">System Language *</label>
+                            <input type="text" class="form-control" id="deviceSystemLang" required>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Popularity Weight</label>
+                        <input type="number" class="form-control" id="deviceWeight" value="1" min="1" max="10">
+                        <small class="text-muted">Higher weight = more likely to be selected randomly</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveDevice()">Save Device</button>
+            </div>
         </div>
     </div>
 </div>
@@ -52,6 +305,14 @@ document.addEventListener('DOMContentLoaded', function() {
     loadAccounts();
     // Auto-refresh every 3 seconds
     setInterval(loadAccounts, 3000);
+    
+    // Load proxies and devices when tabs are shown
+    document.getElementById('proxies-tab').addEventListener('shown.bs.tab', function() {
+        loadProxies();
+    });
+    document.getElementById('devices-tab').addEventListener('shown.bs.tab', function() {
+        loadDevices();
+    });
 });
 
 async function loadAccounts() {
@@ -92,6 +353,7 @@ function renderTable() {
                 <td>${statusBadge}</td>
                 <td>${actionCell}</td>
                 <td>${checkBadge}</td>
+                <td>${getProxyDeviceCell(acc)}</td>
                 <td>${filesCell}</td>
                 <td>
                     ${acc.status === 'registered' ? `<button class="btn btn-sm btn-outline-primary" onclick="checkAccount('${acc.phone}')" title="Re-check account">
@@ -136,7 +398,7 @@ function getActionCell(acc) {
     if (acc.status === 'new') {
         return `
             <div class="d-flex flex-column gap-2">
-                <button class="btn btn-sm btn-primary" onclick="startRegistration('${acc.phone}')">Start</button>
+                <button class="btn btn-sm btn-primary" onclick="startRegistrationWithOptions('${acc.phone}')">Start</button>
                 <button class="btn btn-sm btn-outline-secondary" onclick="resendCode('${acc.phone}')" title="Resend SMS code">
                     <i class="bi bi-arrow-clockwise"></i> Resend Code
                 </button>
@@ -372,6 +634,342 @@ async function deleteAccount(phone) {
             loadAccounts();
         } else {
             alert('Error: ' + (result.error || 'Failed to delete account'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Proxy and Device functions
+function getProxyDeviceCell(acc) {
+    const parts = [];
+    if (acc.proxy_id) {
+        parts.push(`<small><i class="bi bi-shield-lock"></i> Proxy #${acc.proxy_id}</small>`);
+    }
+    if (acc.device_model) {
+        parts.push(`<small><i class="bi bi-phone"></i> ${acc.device_model}</small>`);
+    }
+    return parts.length > 0 ? parts.join('<br>') : '<span class="text-muted">-</span>';
+}
+
+async function loadProxies() {
+    try {
+        const response = await fetch('/api/registration/proxies');
+        const proxies = await response.json();
+        renderProxiesTable(proxies);
+    } catch (error) {
+        console.error('Error loading proxies:', error);
+    }
+}
+
+function renderProxiesTable(proxies) {
+    const tbody = document.getElementById('proxiesTableBody');
+    
+    if (proxies.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center text-muted py-4">
+                    <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                    <p class="mt-2 mb-0">No proxies configured</p>
+                    <small>Click "Add Proxy" to get started</small>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = proxies.map(proxy => {
+        const trafficUsed = proxy.total_gb_used || 0;
+        const trafficTotal = proxy.total_gb_purchased || 0;
+        const trafficRemaining = trafficTotal - trafficUsed;
+        const trafficPercent = trafficTotal > 0 ? (trafficUsed / trafficTotal * 100).toFixed(1) : 0;
+        
+        const statusBadge = proxy.status === 'active' 
+            ? '<span class="badge bg-success">Active</span>'
+            : proxy.status === 'limited'
+            ? '<span class="badge bg-warning">Limited</span>'
+            : '<span class="badge bg-danger">Disabled</span>';
+        
+        return `
+            <tr>
+                <td><strong>${proxy.name}</strong></td>
+                <td><span class="badge bg-info">${proxy.type}</span></td>
+                <td>${proxy.provider}</td>
+                <td>
+                    <small>${trafficUsed.toFixed(2)} / ${trafficTotal.toFixed(2)} GB</small><br>
+                    <small class="text-muted">${trafficRemaining.toFixed(2)} GB left (${trafficPercent}%)</small>
+                </td>
+                <td>${proxy.registrations_count || 0}</td>
+                <td>${statusBadge}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="testProxy(${proxy.id})" title="Test proxy">
+                        <i class="bi bi-check-circle"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteProxy(${proxy.id})" title="Delete proxy">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function loadDevices() {
+    try {
+        const response = await fetch('/api/registration/device-presets');
+        const devices = await response.json();
+        renderDevicesTable(devices);
+    } catch (error) {
+        console.error('Error loading devices:', error);
+    }
+}
+
+function renderDevicesTable(devices) {
+    const tbody = document.getElementById('devicesTableBody');
+    
+    if (devices.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" class="text-center text-muted py-4">
+                    <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                    <p class="mt-2 mb-0">No device presets</p>
+                    <small>Click "Add Device" to get started</small>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = devices.map(device => {
+        const systemBadge = device.system_type === 'android'
+            ? '<span class="badge bg-success">Android</span>'
+            : '<span class="badge bg-primary">iOS</span>';
+        const enabledBadge = device.enabled
+            ? '<span class="badge bg-success">Enabled</span>'
+            : '<span class="badge bg-secondary">Disabled</span>';
+        
+        return `
+            <tr>
+                <td><strong>${device.name}</strong></td>
+                <td><code>${device.device_model}</code></td>
+                <td>${systemBadge}</td>
+                <td>${device.system_version}</td>
+                <td>${device.lang_code} (${device.system_lang_code})</td>
+                <td>${device.popularity_weight}</td>
+                <td>${enabledBadge}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteDevice(${device.id})" title="Delete device">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function fillProviderTemplate() {
+    const provider = document.getElementById('proxyProvider').value;
+    const templates = {
+        'dataimpulse': {
+            host: 'gw.dataimpulse.com',
+            port: 10000,
+            protocol: 'socks5',
+            sessionType: 'rotating'
+        },
+        'smartproxy': {
+            host: 'gate.smartproxy.com',
+            port: 7000,
+            protocol: 'http',
+            sessionType: 'rotating'
+        },
+        'proxy6': {
+            host: 'proxy6.net',
+            port: 1500,
+            protocol: 'socks5',
+            sessionType: 'sticky'
+        }
+    };
+    
+    if (templates[provider]) {
+        const t = templates[provider];
+        document.getElementById('proxyHost').value = t.host;
+        document.getElementById('proxyPort').value = t.port;
+        document.getElementById('proxyProtocol').value = t.protocol;
+        document.getElementById('proxySessionType').value = t.sessionType;
+    }
+}
+
+async function saveProxy() {
+    const proxyData = {
+        name: document.getElementById('proxyName').value,
+        type: document.getElementById('proxyType').value,
+        provider: document.getElementById('proxyProvider').value,
+        host: document.getElementById('proxyHost').value,
+        port: parseInt(document.getElementById('proxyPort').value),
+        username: document.getElementById('proxyUsername').value,
+        password: document.getElementById('proxyPassword').value,
+        protocol: document.getElementById('proxyProtocol').value,
+        session_type: document.getElementById('proxySessionType').value,
+        country: document.getElementById('proxyCountry').value || null,
+        total_gb_purchased: parseFloat(document.getElementById('proxyTotalGB').value) || 0,
+        notes: document.getElementById('proxyNotes').value || null
+    };
+    
+    try {
+        const response = await fetch('/api/registration/proxies/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(proxyData)
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('Proxy added successfully!');
+            bootstrap.Modal.getInstance(document.getElementById('addProxyModal')).hide();
+            document.getElementById('addProxyForm').reset();
+            loadProxies();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to add proxy'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function testProxy(proxyId) {
+    try {
+        const response = await fetch('/api/registration/proxies/test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({proxy_id: proxyId})
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert(`✅ Proxy works!\nIP: ${result.test_results.ip_address}\nCountry: ${result.test_results.country}\nType: ${result.test_results.type}`);
+        } else {
+            alert('Error: ' + (result.error || 'Failed to test proxy'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function deleteProxy(proxyId) {
+    if (!confirm('Delete this proxy?')) return;
+    
+    try {
+        const response = await fetch(`/api/registration/proxies/${proxyId}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            loadProxies();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to delete proxy'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function saveDevice() {
+    const deviceData = {
+        name: document.getElementById('deviceName').value,
+        device_model: document.getElementById('deviceModel').value,
+        system_type: document.getElementById('deviceSystemType').value,
+        system_version: document.getElementById('deviceSystemVersion').value,
+        app_version: document.getElementById('deviceAppVersion').value,
+        lang_code: document.getElementById('deviceLangCode').value,
+        system_lang_code: document.getElementById('deviceSystemLang').value,
+        popularity_weight: parseInt(document.getElementById('deviceWeight').value) || 1
+    };
+    
+    try {
+        const response = await fetch('/api/registration/device-presets/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(deviceData)
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('Device preset added successfully!');
+            bootstrap.Modal.getInstance(document.getElementById('addDeviceModal')).hide();
+            document.getElementById('addDeviceForm').reset();
+            loadDevices();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to add device'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function deleteDevice(deviceId) {
+    if (!confirm('Delete this device preset?')) return;
+    
+    try {
+        const response = await fetch(`/api/registration/device-presets/${deviceId}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            loadDevices();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to delete device'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function startRegistrationWithOptions(phone) {
+    // Auto-select proxy and device
+    try {
+        const proxyResponse = await fetch('/api/registration/proxies');
+        const proxies = await proxyResponse.json();
+        const activeProxies = proxies.filter(p => p.status === 'active' && (p.total_gb_purchased - (p.total_gb_used || 0)) > 0.1);
+        
+        const deviceResponse = await fetch('/api/registration/device-presets/random', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({})
+        });
+        const deviceResult = await deviceResponse.json();
+        
+        // For now, auto-select proxy and device, but can be extended with modal
+        const selectedProxy = activeProxies.length > 0 ? activeProxies[0].id : null;
+        const selectedDevice = deviceResult.success ? deviceResult.device.id : null;
+        
+        startRegistration(phone, selectedProxy, selectedDevice);
+    } catch (error) {
+        console.error('Error selecting proxy/device:', error);
+        // Fallback: start without proxy/device
+        startRegistration(phone, null, null);
+    }
+}
+
+async function startRegistration(phone, proxyId = null, devicePresetId = null) {
+    try {
+        const response = await fetch('/api/registration/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                phone: phone,
+                proxy_id: proxyId,
+                device_preset_id: devicePresetId
+            })
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('Code sent to ' + phone + '. Please check your Telegram app.');
+            loadAccounts();
+        } else {
+            alert('Error: ' + (result.error || result.message || 'Failed to start registration'));
         }
     } catch (error) {
         alert('Error: ' + error.message);
