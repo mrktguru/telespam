@@ -2301,12 +2301,13 @@ def start_registration():
                 
                 db.add_registration_log(phone, '✓ Account not registered, proceeding...', 'success', session_id)
                 
-                # Send code
-                db.add_registration_log(phone, f'Sending SMS code request to {phone}...', 'info', session_id)
-                result = await client.send_code_request(phone)
+                # Send code with force_sms=True to ensure SMS delivery (not Telegram app)
+                # ВАЖНО: force_sms=True заставляет отправить SMS вместо кода в Telegram приложение
+                db.add_registration_log(phone, f'Sending SMS code request to {phone} (force_sms=True)...', 'info', session_id)
+                result = await client.send_code_request(phone, force_sms=True)
                 phone_code_hash = result.phone_code_hash
                 
-                db.add_registration_log(phone, '✓ SMS code sent successfully! Please check your phone.', 'success', session_id)
+                db.add_registration_log(phone, '✓ SMS code sent successfully! Please check your phone for the SMS message (not Telegram app).', 'success', session_id)
                 
                 # Store session info
                 registration_sessions[phone] = {
