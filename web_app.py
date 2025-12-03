@@ -2488,8 +2488,9 @@ def resend_registration_code():
                     await client.disconnect()
                     return {'success': False, 'error': 'Account already registered'}
                 
-                # Send code
-                result = await client.send_code_request(phone)
+                # Send code with force_sms=True to ensure SMS delivery (not Telegram app)
+                # ВАЖНО: force_sms=True заставляет отправить SMS вместо кода в Telegram приложение
+                result = await client.send_code_request(phone, force_sms=True)
                 phone_code_hash = result.phone_code_hash
                 
                 # Store session info
