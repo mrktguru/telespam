@@ -196,38 +196,108 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 print(f"DEBUG: Failed to find user by phone {phone_num}: {e}")
                 pass
 
-        # Last resort: if we have user_id but couldn't find user by ID/username/phone, try direct send
-        if not target and user_id_value is not None:
-            print(f"DEBUG: All methods failed, trying direct send with user_id: {user_id_value}")
-            target = user_id_value
-
+        # Don't try direct send by user_id - it requires access_hash which we don't have
+        # If all methods failed, return error instead of trying to send to invalid entity
         if not target:
             await client.disconnect()
-            return False, 'User not found'
+            # Build error message with available identifiers
+            identifiers = []
+            if user.get('user_id'):
+                identifiers.append(f"ID: {user.get('user_id')}")
+            if user.get('username'):
+                identifiers.append(f"Username: {user.get('username')}")
+            if user.get('phone'):
+                identifiers.append(f"Phone: {user.get('phone')}")
+            error_msg = f"User not found ({', '.join(identifiers)})"
+            return False, error_msg
 
         # Send message with or without media, using HTML parsing
-        if media_path and media_type:
-            media_file = Path(media_path)
-            if media_file.exists():
-                print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
-                # Send with media - use file path directly
-                if media_type == 'photo':
-                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                elif media_type == 'video':
-                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                elif media_type == 'audio':
-                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+        try:
+            if media_path and media_type:
+                media_file = Path(media_path)
+                if media_file.exists():
+                    print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+                    # Send with media - use file path directly
+                    if media_type == 'photo':
+                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                    elif media_type == 'video':
+                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                    elif media_type == 'audio':
+                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                else:
+                    print(f"DEBUG: Media file not found: {media_path}")
+                    # File doesn't exist, send text only
+                    await client.send_message(target, message_text, parse_mode='html')
             else:
-                print(f"DEBUG: Media file not found: {media_path}")
-                # File doesn't exist, send text only
+                # Send text only with HTML formatting
                 await client.send_message(target, message_text, parse_mode='html')
-        else:
-            # Send text only with HTML formatting
-            await client.send_message(target, message_text, parse_mode='html')
             
-        await client.disconnect()
-
-        return True, None
+            await client.disconnect()
+            return True, None
+        except ValueError as ve:
+            # Handle "Could not find the input entity" error - try fallback methods
+            error_str = str(ve)
+            if "Could not find the input entity" in error_str or "PeerUser" in error_str:
+                print(f"DEBUG: Entity error when sending to target, trying fallback methods: {error_str}")
+                # Try to find user by username or phone as fallback
+                fallback_target = None
+                
+                if user.get('username'):
+                    try:
+                        if not client.is_connected():
+                            await client.connect()
+                        username = user['username'].lstrip('@')
+                        fallback_target = await client.get_entity(username)
+                        print(f"DEBUG: Found user by username fallback: {username}")
+                    except Exception as e:
+                        print(f"DEBUG: Username fallback failed: {e}")
+                
+                if not fallback_target and user.get('phone'):
+                    try:
+                        if not client.is_connected():
+                            await client.connect()
+                        phone_num = user['phone']
+                        fallback_target = await client.get_entity(phone_num)
+                        print(f"DEBUG: Found user by phone fallback: {phone_num}")
+                    except Exception as e:
+                        print(f"DEBUG: Phone fallback failed: {e}")
+                
+                if fallback_target:
+                    # Retry sending with fallback target
+                    try:
+                        if media_path and media_type:
+                            media_file = Path(media_path)
+                            if media_file.exists():
+                                if media_type == 'photo':
+                                    await client.send_file(fallback_target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                elif media_type == 'video':
+                                    await client.send_file(fallback_target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                elif media_type == 'audio':
+                                    await client.send_file(fallback_target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                            else:
+                                await client.send_message(fallback_target, message_text, parse_mode='html')
+                        else:
+                            await client.send_message(fallback_target, message_text, parse_mode='html')
+                        await client.disconnect()
+                        print(f"DEBUG: Successfully sent using fallback method")
+                        return True, None
+                    except Exception as e2:
+                        await client.disconnect()
+                        return False, f'Could not send to user (fallback also failed): {str(e2)}'
+                else:
+                    await client.disconnect()
+                    identifiers = []
+                    if user.get('user_id'):
+                        identifiers.append(f"ID: {user.get('user_id')}")
+                    if user.get('username'):
+                        identifiers.append(f"Username: {user.get('username')}")
+                    if user.get('phone'):
+                        identifiers.append(f"Phone: {user.get('phone')}")
+                    return False, f'Could not find the input entity. User may not be accessible. Tried: {", ".join(identifiers)}'
+            else:
+                # Other ValueError, re-raise
+                await client.disconnect()
+                raise
 
     except FloodWaitError as e:
         await client.disconnect()
