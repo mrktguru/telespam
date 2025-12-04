@@ -510,9 +510,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -746,13 +746,13 @@ def new_campaign():
                     # Generate new ID: acc_{phone}_{campaign_id}
                 # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
-                
-                # Update account with new ID and campaign_id
-                sheets_manager.update_account(account_id, {
-                    'new_id': new_account_id,
-                    'campaign_id': campaign_id
-                })
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    
+                    # Update account with new ID and campaign_id
+                    sheets_manager.update_account(account_id, {
+                        'new_id': new_account_id,
+                        'campaign_id': campaign_id
+                    })
         flash('Campaign created! Starting...', 'success')
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
 
@@ -1200,19 +1200,18 @@ def accounts_list():
 
     print(f"DEBUG: Found {len(accounts)} accounts in storage")
     for i, acc in enumerate(accounts):
-        print(f"DEBUG: Account {i+1}: id={acc.get('id')}, phone={acc.get('phone')}, status={acc.get('status')}, first_name={acc.get('first_name')}")
+        acc_id = acc.get('id', 'MISSING')
+        acc_phone = acc.get('phone', 'MISSING')
+        acc_status = acc.get('status', 'MISSING')
+        acc_first_name = acc.get('first_name', 'MISSING')
+        print(f"DEBUG: Account {i+1}: id={acc_id}, phone={acc_phone}, status={acc_status}, first_name={acc_first_name}")
+        print(f"DEBUG: Account {i+1} full data: {acc}")
 
-    # Filter out accounts without required fields (but log them)
-    filtered_accounts = []
-    for acc in accounts:
-        if not acc.get('id'):
-            print(f"WARNING: Account missing ID, skipping: {acc}")
-            continue
-        if not acc.get('phone') and not acc.get('first_name'):
-            print(f"WARNING: Account {acc.get('id')} missing both phone and first_name, but including anyway")
-        filtered_accounts.append(acc)
+    # Don't filter - show all accounts, even if they have missing fields
+    # The template handles missing fields with 'or' operators
+    filtered_accounts = accounts
     
-    print(f"DEBUG: After filtering: {len(filtered_accounts)} accounts")
+    print(f"DEBUG: After processing: {len(filtered_accounts)} accounts to display")
 
     # Add rate limit stats (handle errors gracefully)
     for acc in filtered_accounts:
@@ -1220,7 +1219,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-                acc['rate_limits'] = stats
+        acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
