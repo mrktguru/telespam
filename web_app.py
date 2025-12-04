@@ -758,6 +758,7 @@ def new_campaign():
     # Get accounts and users for form
     accounts = sheets_manager.get_all_accounts()
     users = sheets_manager.users
+    proxies = proxy_manager.get_all_proxies()
 
     # Debug: log all accounts being sent to template
     print(f"DEBUG new_campaign: Found {len(accounts)} accounts to display")
@@ -770,7 +771,7 @@ def new_campaign():
     print(f"DEBUG new_campaign: {len(available_accounts)} accounts available (excluding limited/unauthorized)")
     
     # Pass both all accounts and available accounts to template
-    return render_template('new_campaign.html', accounts=accounts, available_accounts=available_accounts, users=users)
+    return render_template('new_campaign.html', accounts=accounts, available_accounts=available_accounts, users=users, proxies=proxies)
 
 
 @app.route('/campaigns/<int:campaign_id>')
