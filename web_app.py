@@ -217,9 +217,6 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 # Other ValueError, re-raise
                 await client.disconnect()
                 raise
-                # Other ValueError, re-raise
-                await client.disconnect()
-                raise
 
     except FloodWaitError as e:
         await client.disconnect()
