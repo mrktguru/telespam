@@ -1229,7 +1229,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-        acc['rate_limits'] = stats
+                acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
