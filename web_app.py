@@ -208,66 +208,15 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             await client.disconnect()
             return True, None
         except ValueError as ve:
-            # Handle "Could not find the input entity" error - try fallback methods
+            # Handle "Could not find the input entity" error
             error_str = str(ve)
             if "Could not find the input entity" in error_str or "PeerUser" in error_str:
-                print(f"DEBUG: Entity error when sending to target, trying fallback methods: {error_str}")
-                # Try to find user by username or phone as fallback
-                fallback_target = None
-                
-                if user.get('username'):
-                    try:
-                        if not client.is_connected():
-                            await client.connect()
-                        username = user['username'].lstrip('@')
-                        fallback_target = await client.get_entity(username)
-                        print(f"DEBUG: Found user by username fallback: {username}")
-                    except Exception as e:
-                        print(f"DEBUG: Username fallback failed: {e}")
-                
-                if not fallback_target and user.get('phone'):
-                    try:
-                        if not client.is_connected():
-                            await client.connect()
-                        phone_num = user['phone']
-                        fallback_target = await client.get_entity(phone_num)
-                        print(f"DEBUG: Found user by phone fallback: {phone_num}")
-                    except Exception as e:
-                        print(f"DEBUG: Phone fallback failed: {e}")
-                
-                if fallback_target:
-                    # Retry sending with fallback target
-                    try:
-                        if media_path and media_type:
-                            media_file = Path(media_path)
-                            if media_file.exists():
-                                if media_type == 'photo':
-                                    await client.send_file(fallback_target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                                elif media_type == 'video':
-                                    await client.send_file(fallback_target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                                elif media_type == 'audio':
-                                    await client.send_file(fallback_target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                            else:
-                                await client.send_message(fallback_target, message_text, parse_mode='html')
-                        else:
-                            await client.send_message(fallback_target, message_text, parse_mode='html')
-                        await client.disconnect()
-                        print(f"DEBUG: Successfully sent using fallback method")
-        return True, None
-                    except Exception as e2:
-                        await client.disconnect()
-                        return False, f'Could not send to user (fallback also failed): {str(e2)}'
-                else:
-                    await client.disconnect()
-                    identifiers = []
-                    if user.get('user_id'):
-                        identifiers.append(f"ID: {user.get('user_id')}")
-                    if user.get('username'):
-                        identifiers.append(f"Username: {user.get('username')}")
-                    if user.get('phone'):
-                        identifiers.append(f"Phone: {user.get('phone')}")
-                    return False, f'Could not find the input entity. User may not be accessible. Tried: {", ".join(identifiers)}'
+                await client.disconnect()
+                return False, f'Could not find the input entity for user ID: {user.get("user_id")}. User may not be accessible or may have blocked the account.'
             else:
+                # Other ValueError, re-raise
+                await client.disconnect()
+                raise
                 # Other ValueError, re-raise
                 await client.disconnect()
                 raise
