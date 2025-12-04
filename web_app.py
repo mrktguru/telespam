@@ -2027,13 +2027,14 @@ def proxies_list():
 
         if action == 'test' and proxy_id:
             # Test proxy
-            import asyncio
-            result = asyncio.run(proxy_manager.test_proxy(proxy_id))
+            result = proxy_manager.test_proxy(proxy_id)
 
             if result:
                 flash(f'Proxy {proxy_id} is working!', 'success')
             else:
-                flash(f'Proxy {proxy_id} failed test', 'danger')
+                proxy = proxy_manager.get_proxy(proxy_id)
+                error_msg = proxy.get('error', 'Unknown error') if proxy else 'Proxy not found'
+                flash(f'Proxy {proxy_id} failed test: {error_msg}', 'danger')
 
             return redirect(url_for('proxies_list'))
 
