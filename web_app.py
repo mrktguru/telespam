@@ -74,13 +74,21 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             await client.disconnect()
             return False, 'Account not authorized'
 
-        # Find user by username, user_id or phone
+        # Find user by user_id, username or phone
         target = None
         user_identifier = None
         error_details = []
 
-        # Try username first (most reliable)
-        if user.get('username'):
+        # Try user_id first (most precise identifier)
+        # Telethon can send to ID if user is in recent dialogs or has access_hash
+        if user.get('user_id'):
+            user_id = int(user['user_id'])
+            user_identifier = f"ID {user_id}"
+            # Use ID directly - Telethon will have access_hash if interacted before
+            target = user_id
+
+        # Try username if no user_id
+        if not target and user.get('username'):
             username = user['username'].lstrip('@')
             try:
                 target = await client.get_entity(username)
@@ -88,7 +96,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             except Exception as e:
                 error_details.append(f"username @{username}: {str(e)}")
 
-        # Try phone if no username
+        # Try phone as last resort
         if not target and user.get('phone'):
             phone_num = user['phone']
             try:
@@ -96,15 +104,6 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 user_identifier = phone_num
             except Exception as e:
                 error_details.append(f"phone {phone_num}: {str(e)}")
-
-        # For user_id - try to send directly without get_entity
-        # Telethon can send to ID if user is in recent dialogs
-        if not target and user.get('user_id'):
-            user_id = int(user['user_id'])
-            user_identifier = f"ID {user_id}"
-            # We'll try to send directly using the ID
-            # If user has interacted before, Telethon will have the access_hash
-            target = user_id  # Use ID directly
 
         if not target:
             await client.disconnect()
