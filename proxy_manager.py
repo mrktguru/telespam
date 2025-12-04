@@ -91,9 +91,9 @@ class ProxyManager:
         """Get all proxies"""
         return self.proxies
 
-    async def test_proxy(self, proxy_id: str) -> bool:
+    def test_proxy(self, proxy_id: str) -> bool:
         """
-        Test proxy connectivity
+        Test proxy connectivity with actual HTTP request
 
         Args:
             proxy_id: Proxy ID
@@ -107,22 +107,59 @@ class ProxyManager:
             return False
 
         try:
-            # Simple socket connection test
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-
-            result = sock.connect_ex((proxy['host'], proxy['port']))
-
-            sock.close()
-
-            if result == 0:
-                self.proxies[proxy_id]['status'] = 'working'
-                self.save()
-                return True
-            else:
-                self.proxies[proxy_id]['status'] = 'failed'
-                self.save()
-                return False
+            if not AIOHTTP_AVAILABLE:
+                # Fallback to simple socket test if aiohttp is not available
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                result = sock.connect_ex((proxy['host'], proxy['port']))
+                sock.close()
+                
+                if result == 0:
+                    self.proxies[proxy_id]['status'] = 'working'
+                    self.proxies[proxy_id].pop('error', None)
+                    self.save()
+                    return True
+                else:
+                    self.proxies[proxy_id]['status'] = 'failed'
+                    self.proxies[proxy_id]['error'] = 'Connection failed'
+                    self.save()
+                    return False
+            
+            async def test_connection():
+                try:
+                    # Prepare proxy URL
+                    if proxy.get('username') and proxy.get('password'):
+                        proxy_url = f"{proxy['type']}://{proxy['username']}:{proxy['password']}@{proxy['host']}:{proxy['port']}"
+                    else:
+                        proxy_url = f"{proxy['type']}://{proxy['host']}:{proxy['port']}"
+                    
+                    # Test connection with actual HTTP request
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            'https://api.ipify.org?format=json',
+                            proxy=proxy_url,
+                            timeout=aiohttp.ClientTimeout(total=10)
+                        ) as response:
+                            if response.status == 200:
+                                ip_data = await response.json()
+                                self.proxies[proxy_id]['status'] = 'working'
+                                self.proxies[proxy_id]['test_ip'] = ip_data.get('ip', 'Unknown')
+                                self.proxies[proxy_id].pop('error', None)
+                                self.save()
+                                return True
+                            else:
+                                self.proxies[proxy_id]['status'] = 'failed'
+                                self.proxies[proxy_id]['error'] = f'HTTP {response.status}'
+                                self.save()
+                                return False
+                except Exception as e:
+                    self.proxies[proxy_id]['status'] = 'failed'
+                    self.proxies[proxy_id]['error'] = str(e)
+                    self.save()
+                    return False
+            
+            # Run async test
+            return asyncio.run(test_connection())
 
         except Exception as e:
             self.proxies[proxy_id]['status'] = 'failed'
