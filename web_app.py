@@ -179,14 +179,26 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 pass
 
         # Priority 2: Username (only if ID not found or not provided)
-        if not target and user.get('username'):
-            username = user['username'].lstrip('@')
-            try:
-                target = await client.get_entity(username)
-                print(f"DEBUG: Found user by username: {username}")
-            except Exception as e:
-                print(f"DEBUG: Failed to find user by username {username}: {e}")
-                pass
+        # Also check if user_id field contains a username (non-numeric string)
+        if not target:
+            # Check username field first
+            username = None
+            if user.get('username'):
+                username = user['username'].lstrip('@')
+            # If user_id is not numeric, it might be a username stored in user_id field
+            elif user.get('user_id'):
+                user_id_str = str(user['user_id']).strip()
+                if user_id_str and not user_id_str.isdigit():
+                    username = user_id_str.lstrip('@')
+                    print(f"DEBUG: user_id field contains username: {username}")
+            
+            if username:
+                try:
+                    target = await client.get_entity(username)
+                    print(f"DEBUG: Found user by username: {username}")
+                except Exception as e:
+                    print(f"DEBUG: Failed to find user by username {username}: {e}")
+                    pass
 
         # Priority 3: Phone (only if ID and Username not found or not provided)
         if not target and user.get('phone'):
