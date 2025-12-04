@@ -1200,10 +1200,22 @@ def accounts_list():
 
     print(f"DEBUG: Found {len(accounts)} accounts in storage")
     for i, acc in enumerate(accounts):
-        print(f"DEBUG: Account {i+1}: id={acc.get('id')}, phone={acc.get('phone')}, status={acc.get('status')}")
+        print(f"DEBUG: Account {i+1}: id={acc.get('id')}, phone={acc.get('phone')}, status={acc.get('status')}, first_name={acc.get('first_name')}")
+
+    # Filter out accounts without required fields (but log them)
+    filtered_accounts = []
+    for acc in accounts:
+        if not acc.get('id'):
+            print(f"WARNING: Account missing ID, skipping: {acc}")
+            continue
+        if not acc.get('phone') and not acc.get('first_name'):
+            print(f"WARNING: Account {acc.get('id')} missing both phone and first_name, but including anyway")
+        filtered_accounts.append(acc)
+    
+    print(f"DEBUG: After filtering: {len(filtered_accounts)} accounts")
 
     # Add rate limit stats (handle errors gracefully)
-    for acc in accounts:
+    for acc in filtered_accounts:
         try:
             acc_id = acc.get('id', '')
             if acc_id:
@@ -1215,8 +1227,8 @@ def accounts_list():
             print(f"Warning: Could not get rate limits for account {acc.get('id')}: {e}")
             acc['rate_limits'] = None
 
-    print(f"DEBUG: Returning {len(accounts)} accounts to template")
-    return render_template('accounts.html', accounts=accounts)
+    print(f"DEBUG: Returning {len(filtered_accounts)} accounts to template")
+    return render_template('accounts.html', accounts=filtered_accounts)
 
 
 @app.route('/accounts/delete/<account_id>', methods=['POST'])
