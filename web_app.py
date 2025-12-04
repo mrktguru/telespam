@@ -133,47 +133,49 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         # Find user by priority: ID (1) -> Username (2) -> Phone (3)
         target = None
         
-        # Priority 1: User ID
+        # Priority 1: User ID (only if it's a numeric value)
         user_id_value = None  # Store converted user_id for fallback
         if user.get('user_id'):
-            try:
-                # Convert user_id to int (can be string from DB)
-                user_id_str = str(user['user_id']).strip()
-                if not user_id_str:
-                    raise ValueError("Empty user_id")
-                
-                user_id_value = int(user_id_str)
-                print(f"DEBUG: Attempting to find user by ID: {user_id_value} (original: {user.get('user_id')})")
-                
-                # Try to get entity by ID - this works if user is in contacts or was contacted before
+            user_id_str = str(user['user_id']).strip()
+            # Check if user_id is actually a numeric ID (not a username)
+            if user_id_str and user_id_str.isdigit():
                 try:
-                    target = await client.get_entity(user_id_value)
-                    print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id_value}")
-                except (ValueError, TypeError) as ve:
-                    # If get_entity fails with ValueError (user not found), try other methods
-                    print(f"DEBUG: get_entity failed for ID {user_id_value}: {ve}, trying alternative methods...")
+                    user_id_value = int(user_id_str)
+                    print(f"DEBUG: Attempting to find user by ID: {user_id_value} (original: {user.get('user_id')})")
+                    
+                    # Try to get entity by ID - this works if user is in contacts or was contacted before
                     try:
-                        from telethon.tl.types import InputPeerUser
-                        from telethon.tl.functions.users import GetUsersRequest
-                        
-                        # Try to get user info to get access_hash
-                        users_result = await client(GetUsersRequest([user_id_value]))
-                        if users_result and len(users_result) > 0:
-                            user_obj = users_result[0]
-                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                            print(f"DEBUG: ✓ Found user by ID using GetUsersRequest: {user_id_value}")
-                        else:
-                            # Can't get access_hash, but don't set target yet - try username/phone first
-                            print(f"DEBUG: GetUsersRequest returned empty for ID {user_id_value}, will try username/phone")
-                    except Exception as e2:
-                        print(f"DEBUG: GetUsersRequest failed for ID {user_id_value}: {e2}, will try username/phone")
-            except (ValueError, TypeError) as e:
-                print(f"DEBUG: Invalid user_id format: {user.get('user_id')} - {e}")
-                # user_id is invalid, continue to try username/phone
-                pass
-            except Exception as e:
-                print(f"DEBUG: Failed to process user_id {user.get('user_id')}: {e}")
-                # Continue to try username/phone
+                        target = await client.get_entity(user_id_value)
+                        print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id_value}")
+                    except (ValueError, TypeError) as ve:
+                        # If get_entity fails with ValueError (user not found), try other methods
+                        print(f"DEBUG: get_entity failed for ID {user_id_value}: {ve}, trying alternative methods...")
+                        try:
+                            from telethon.tl.types import InputPeerUser
+                            from telethon.tl.functions.users import GetUsersRequest
+                            
+                            # Try to get user info to get access_hash
+                            users_result = await client(GetUsersRequest([user_id_value]))
+                            if users_result and len(users_result) > 0:
+                                user_obj = users_result[0]
+                                target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                                print(f"DEBUG: ✓ Found user by ID using GetUsersRequest: {user_id_value}")
+                            else:
+                                # Can't get access_hash, but don't set target yet - try username/phone first
+                                print(f"DEBUG: GetUsersRequest returned empty for ID {user_id_value}, will try username/phone")
+                        except Exception as e2:
+                            print(f"DEBUG: GetUsersRequest failed for ID {user_id_value}: {e2}, will try username/phone")
+                except (ValueError, TypeError) as e:
+                    print(f"DEBUG: Invalid user_id format: {user.get('user_id')} - {e}")
+                    # user_id is invalid, continue to try username/phone
+                    pass
+                except Exception as e:
+                    print(f"DEBUG: Failed to process user_id {user.get('user_id')}: {e}")
+                    # Continue to try username/phone
+                    pass
+            else:
+                # user_id is not numeric - it's likely a username, will be handled in username priority
+                print(f"DEBUG: user_id '{user_id_str}' is not numeric, treating as potential username")
                 pass
 
         # Priority 2: Username (only if ID not found or not provided)
