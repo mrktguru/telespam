@@ -8,6 +8,8 @@
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Bootstrap Icons -->
+    <!-- SheetJS for XLS/XLSX parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
 
     <style>
@@ -95,6 +97,9 @@
             </a>
             <a class="nav-link {% if request.endpoint == 'proxies_list' %}active{% endif %}" href="{{ url_for('proxies_list') }}">
                 <i class="bi bi-shield-lock"></i> Proxies
+            </a>
+            <a class="nav-link {% if request.endpoint == 'create_accounts' %}active{% endif %}" href="{{ url_for('create_accounts') }}">
+                <i class="bi bi-person-plus"></i> Create Accounts
             </a>
             <hr style="border-color: rgba(255,255,255,0.1); margin: 1rem 0;">
             <a class="nav-link" href="{{ url_for('logout') }}">

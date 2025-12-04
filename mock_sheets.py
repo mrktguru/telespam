@@ -3,6 +3,7 @@
 from typing import Dict, List, Optional
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 
 
@@ -39,32 +40,97 @@ class MockSheetsManager:
                     self.users = data.get('users', [])
                     self.logs = data.get('logs', [])
                     self.settings = data.get('settings', self.settings)
-                print(f"Loaded test data from {self.storage_file}")
+                print(f"✓ Loaded {len(self.accounts)} accounts from {self.storage_file}")
             except Exception as e:
-                print(f"Could not load test data: {e}")
+                print(f"❌ Could not load test data: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"ℹ Storage file {self.storage_file} does not exist, starting with empty data")
 
     def _save_to_file(self):
-        """Save data to JSON file"""
-        try:
-            data = {
-                'accounts': self.accounts,
-                'dialogs': self.dialogs,
-                'users': self.users,
-                'logs': self.logs[-100:],  # Keep last 100 logs
-                'settings': self.settings
-            }
-            with open(self.storage_file, 'w') as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            print(f"Could not save test data: {e}")
+        """Save data to JSON file with retry logic"""
+        import time
+        max_retries = 3
+        retry_delay = 0.1
+        
+        for attempt in range(max_retries):
+            try:
+                data = {
+                    'accounts': self.accounts,
+                    'dialogs': self.dialogs,
+                    'users': self.users,
+                    'logs': self.logs[-100:],  # Keep last 100 logs
+                    'settings': self.settings
+                }
+                # Use atomic write to prevent data loss
+                import tempfile
+                temp_file = self.storage_file.with_suffix('.tmp')
+                
+                # Ensure directory exists
+                self.storage_file.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Write to temp file
+                with open(temp_file, 'w') as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())  # Force write to disk
+                
+                # Atomic replace
+                if self.storage_file.exists():
+                    # Remove old file first on Windows
+                    try:
+                        self.storage_file.unlink()
+                    except:
+                        pass
+                
+                temp_file.replace(self.storage_file)
+                print(f"✓ Saved {len(self.accounts)} accounts to {self.storage_file}")
+                return
+                
+            except PermissionError as e:
+                if attempt < max_retries - 1:
+                    print(f"⚠ Permission error (attempt {attempt + 1}/{max_retries}), retrying...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    print(f"❌ Could not save test data: Permission denied. Check file permissions: {self.storage_file}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"⚠ Error saving (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    print(f"❌ Could not save test data after {max_retries} attempts: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
 
     # Accounts operations
 
     def add_account(self, account: Dict) -> bool:
         """Add new account (always starts as 'free' account without campaign_id)"""
+        # Check if account with same ID already exists
+        account_id = account.get('id')
+        if account_id:
+            for existing in self.accounts:
+                if existing.get('id') == account_id:
+                    print(f"⚠ Account with ID {account_id} already exists, skipping duplicate")
+                    return False
+        
         self.accounts.append(account)
         self._save_to_file()
-        print(f"✓ Account added: {account.get('id')} - {account.get('phone')}")
+        
+        # Verify account was saved
+        saved_count = len(self.accounts)
+        print(f"✓ Account added: {account.get('id')} - {account.get('phone')} (Total accounts: {saved_count})")
+        
+        # Don't reload from file here - it would overwrite in-memory changes
+        # File is already saved, in-memory state is correct
+        
         return True
 
     def get_account(self, account_id: str) -> Optional[Dict]:
@@ -88,10 +154,14 @@ class MockSheetsManager:
                     self.accounts[i]['id'] = new_id
                     print(f"✓ Account ID changed: {account_id} → {new_id}")
                 
+                # Update account fields
                 self.accounts[i].update(updates)
                 self._save_to_file()
                 print(f"✓ Account updated: {self.accounts[i].get('id')} - {updates}")
+                print(f"  Updated account phone: {self.accounts[i].get('phone')}, status: {self.accounts[i].get('status')}")
+                # Don't reload from file - in-memory state is correct
                 return True
+        print(f"⚠ Account not found for update: {account_id}")
         return False
 
     def delete_account(self, account_id: str) -> bool:

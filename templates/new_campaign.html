@@ -9,8 +9,16 @@
         <i class="bi bi-arrow-left"></i> Back
     </a>
 </div>
+<div class="alert alert-warning mb-3" role="alert">
+    <strong>🚀 Version 2.0 - Build 20241130_142500</strong><br>
+    <small>✅ If you see this yellow box, the page has been updated!<br>
+    📋 Check browser console (F12) for detailed import logs.</small>
+</div>
 
-<form method="POST">
+<form method="POST" enctype="multipart/form-data" onsubmit="return window.prepareCampaignData();">
+    <!-- Hidden field for campaign users data -->
+    <input type="hidden" id="campaignUsersData" name="campaign_users_data" value="[]">
+    
     <div class="row">
         <div class="col-lg-8">
             <!-- Campaign Details -->
@@ -89,47 +97,100 @@
                 </div>
             </div>
 
-            <!-- Select Users -->
+            <!-- Campaign Users -->
             <div class="card mb-4">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0">Select Users</h5>
+                    <h5 class="card-title mb-0">Campaign Users</h5>
                     <div>
-                        <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="document.getElementById('csvUpload').click()">
-                            <i class="bi bi-upload"></i> CSV/XLS
+                        <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="importCsvButton">
+                            <i class="bi bi-upload"></i> Import CSV/XLS
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllUsers()">
-                            Select All
+                        <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#addUserModal">
+                            <i class="bi bi-plus-circle"></i> Add User
                         </button>
                     </div>
                 </div>
-                <input type="file" id="csvUpload" accept=".csv,.xlsx,.xls" style="display: none;" onchange="handleCSVUpload(event)">
+                <input type="file" id="csvUpload" accept=".csv,.xlsx,.xls" style="display: none;" >
+                
+                <!-- Import Status -->
                 <div id="importStatus" class="alert alert-info m-3" style="display: none;"></div>
-                <div class="card-body" style="max-height: 400px; overflow-y: auto;">
-                    {% if users %}
-                        {% for user in users %}
-                        <div class="form-check mb-2">
-                            <input class="form-check-input user-checkbox" type="checkbox"
-                                   name="users" value="{{ loop.index0 }}" id="user{{ loop.index }}">
-                            <label class="form-check-label" for="user{{ loop.index }}">
-                                <strong>@{{ user.username or 'N/A' }}</strong>
-                                {% if user.user_id %}
-                                    <small class="text-muted">(ID: {{ user.user_id }})</small>
-                                {% endif %}
-                                <span class="badge bg-{{ 'info' if user.status == 'pending' else 'secondary' }} ms-2">
-                                    {{ user.status }}
-                                </span>
-                            </label>
+                
+                <!-- Filters -->
+                <div class="card-body border-bottom">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-3">
+                            <input type="text" class="form-control form-control-sm" id="filterUsername" placeholder="Search by username..." onkeyup="filterCampaignUsers()">
                         </div>
-                        {% endfor %}
-                    {% else %}
-                        <div class="text-center text-muted py-4">
-                            <i class="bi bi-people" style="font-size: 2rem;"></i>
-                            <p class="mt-2 mb-0">No users available. Add users first.</p>
-                            <a href="{{ url_for('users_list') }}" class="btn btn-sm btn-primary mt-2">
-                                Add Users
-                            </a>
+                        <div class="col-md-2">
+                            <input type="text" class="form-control form-control-sm" id="filterUserId" placeholder="User ID..." onkeyup="filterCampaignUsers()">
                         </div>
-                    {% endif %}
+                        <div class="col-md-2">
+                            <select class="form-select form-select-sm" id="filterPriority" onchange="filterCampaignUsers()">
+                                <option value="">All Priorities</option>
+                                <option value="1">Priority 1</option>
+                                <option value="2">Priority 2</option>
+                                <option value="3">Priority 3</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="button" class="btn btn-sm btn-secondary w-100" onclick="clearCampaignFilters()">Clear</button>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="button" class="btn btn-sm btn-danger w-100" id="deleteSelectedUsersBtn" onclick="deleteSelectedCampaignUsers()" disabled>
+                                <i class="bi bi-trash"></i> Delete Selected (<span id="selectedCount">0</span>)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Users Table -->
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-sm table-striped mb-0" id="campaignUsersTable">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th width="40">
+                                        <input type="checkbox" id="selectAllUsers" onchange="toggleAllCampaignUsers(this)">
+                                    </th>
+                                    <th>Username</th>
+                                    <th>User ID</th>
+                                    <th>Phone</th>
+                                    <th>Priority</th>
+                                    <th width="60">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="campaignUsersBody">
+                                <!-- Users will be dynamically added here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="noUsersMessage" class="p-4 text-center text-muted">
+                        <i class="bi bi-people fs-3 d-block mb-2"></i>
+                        <p class="mb-0">No users added to this campaign yet.</p>
+                        <small>Import users via CSV/Excel files or add manually.</small>
+                        <div class="mt-2">
+                            <details>
+                                <summary class="text-primary" style="cursor: pointer;">CSV Format Help</summary>
+                                <div class="mt-2 p-2 bg-light rounded">
+                                    <strong>Supported File Formats:</strong>
+                                    <pre class="mt-1 mb-1">User name,User ID,Phone number
+john_doe,123456789,+1234567890
+@jane_smith,987654321,+9876543210
+mike_wilson,555444333,+5554443333</pre>
+                                    <small class="text-muted">
+                                        • Column 1: User name (Telegram username, @ optional)
+                                        <br>• Column 2: User ID (numeric Telegram ID)
+                                        <br>• Column 3: Phone number (with + prefix)
+                                        <br>• At least one field (User name, User ID, or Phone) required
+                                        <br><strong>Excel Support:</strong>
+                                        <br>• Supports .xlsx, .xls, .xlsm formats
+                                        <br>• Uses first worksheet
+                                        <br>• Same column structure as CSV
+                                    </small>
+                                </div>
+                            </details>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -143,21 +204,31 @@
                         Select All
                     </button>
                 </div>
-                <div class="card-body">
+                <div class="card-body" style="max-height: 500px; overflow-y: auto;">
                     {% if accounts %}
+                        <p class="text-muted small mb-2">Total accounts: {{ accounts|length }}</p>
                         {% for account in accounts %}
                         <div class="form-check mb-3">
+                            {% if account.status in ['limited', 'unauthorized'] %}
+                                <input class="form-check-input account-checkbox" type="checkbox"
+                                       name="accounts" value="{{ account.phone }}" id="acc{{ loop.index }}" disabled
+                                       title="Account is {{ account.status }}, cannot be used for campaigns">
+                            {% else %}
                             <input class="form-check-input account-checkbox" type="checkbox"
                                    name="accounts" value="{{ account.phone }}" id="acc{{ loop.index }}">
-                            <label class="form-check-label" for="acc{{ loop.index }}">
+                            {% endif %}
+                            <label class="form-check-label" for="acc{{ loop.index }}" style="{% if account.status in ['limited', 'unauthorized'] %}opacity: 0.6;{% endif %}">
                                 <div>
                                     <strong>{{ account.phone or 'N/A' }}</strong>
                                     <br>
                                     <small class="text-muted">{{ account.first_name }}</small>
                                     <br>
-                                    <span class="badge bg-{{ 'success' if account.status == 'active' else 'warning' }}">
+                                    <span class="badge bg-{{ 'success' if account.status == 'active' else 'warning' if account.status == 'warming' else 'danger' if account.status in ['limited', 'unauthorized'] else 'secondary' }}">
                                         {{ account.status }}
                                     </span>
+                                    {% if account.status in ['limited', 'unauthorized'] %}
+                                        <small class="text-muted d-block mt-1">(Not available for campaigns)</small>
+                                    {% endif %}
                                 </div>
                             </label>
                         </div>
@@ -168,6 +239,35 @@
                             <p class="mt-2 mb-0">No accounts available</p>
                         </div>
                     {% endif %}
+                </div>
+            </div>
+
+            <!-- Proxy Selection -->
+            <div class="card mb-4">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Select Proxies</h5>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllProxies()">
+                        Select All
+                    </button>
+                </div>
+                <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                    <div id="proxiesList">
+                        <div class="text-center text-muted py-3">
+                            <div class="spinner-border spinner-border-sm" role="status"></div>
+                            <span class="ms-2">Loading proxies...</span>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button type="button" class="btn btn-sm btn-outline-info w-100" onclick="checkProxyIPs()">
+                            <i class="bi bi-globe"></i> Check IP Addresses
+                        </button>
+                    </div>
+                    <div id="proxyIPResults" class="mt-3" style="display: none;">
+                        <div class="alert alert-info small mb-0">
+                            <strong>IP Addresses:</strong>
+                            <div id="proxyIPList" class="mt-2"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -183,6 +283,9 @@
 
                         <dt class="col-sm-6">Users:</dt>
                         <dd class="col-sm-6"><span id="userCount">0</span> selected</dd>
+
+                        <dt class="col-sm-6">Proxies:</dt>
+                        <dd class="col-sm-6"><span id="proxyCount">0</span> selected</dd>
                     </dl>
 
                     <hr>
@@ -195,99 +298,194 @@
         </div>
     </div>
 </form>
+
+<!-- Add User Modal -->
+<div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add User to Campaign</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addUserForm">
+                    <div class="mb-3">
+                        <label for="modalUsername" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="modalUsername" placeholder="@username">
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalUserId" class="form-label">User ID</label>
+                        <input type="text" class="form-control" id="modalUserId" placeholder="123456789">
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalPhone" class="form-label">Phone</label>
+                        <input type="text" class="form-control" id="modalPhone" placeholder="+1234567890">
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalPriority" class="form-label">Priority</label>
+                        <select class="form-select" id="modalPriority">
+                            <option value="1">Priority 1 (High)</option>
+                            <option value="2">Priority 2 (Medium)</option>
+                            <option value="3">Priority 3 (Low)</option>
+                        </select>
+                    </div>
+                    <small class="text-muted">At least one field (username, user ID, or phone) must be provided.</small>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitAddUser()">Add User</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
+console.log("Campaign JavaScript loaded");
+
+// Campaign users array - must be global
+let campaignUsers = [];
+
+// Define functions FIRST, before anything else - GLOBALLY
+window.triggerFileUpload = function() {
+    const csvUpload = document.getElementById('csvUpload');
+    if (!csvUpload) {
+        console.error("❌ CSV upload element not found!");
+        alert("Error: File upload element not found!");
+        return false;
+    }
+    csvUpload.click();
+    return false;
+};
+
+// Prepare campaign data before form submission - GLOBALLY
+window.prepareCampaignData = function() {
+    console.log('Preparing campaign data...');
+    const jsonData = JSON.stringify(campaignUsers);
+    const hiddenField = document.getElementById('campaignUsersData');
+    if (hiddenField) {
+        hiddenField.value = jsonData;
+        console.log('Prepared campaign data:', jsonData);
+        console.log('Campaign users count:', campaignUsers.length);
+    } else {
+        console.error('campaignUsersData field not found!');
+    }
+    return true; // Allow form submission
+};
+
+(function() {
+    'use strict';
+    
+    // Simple button handler - attach when DOM is ready
+    let buttonHandlerAttached = false;
+    function setupButton() {
+        // Prevent duplicate handlers
+        if (buttonHandlerAttached) {
+            return true;
+        }
+        
+        const button = document.getElementById('importCsvButton');
+        if (!button) {
+            return false;
+        }
+        
+        // Remove any existing handlers by cloning
+        const newButton = button.cloneNode(true);
+        button.parentNode.replaceChild(newButton, button);
+        
+        // Add single click handler
+        newButton.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof window.triggerFileUpload === 'function') {
+                window.triggerFileUpload();
+            }
+            return false;
+        }, false);
+        
+        buttonHandlerAttached = true;
+        return true;
+    }
+    
+    // Try to setup immediately
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', setupButton);
+    } else {
+        if (!setupButton()) {
+            setTimeout(setupButton, 100);
+        }
+    }
+    
+    // Fallback
+    setTimeout(function() {
+        const button = document.getElementById('importCsvButton');
+        if (button && !button.onclick) {
+            setupButton();
+        }
+    }, 1000);
+})();
+
+// ========================================================================
+// REST OF THE CODE
+// ========================================================================
+
+// Check if SheetJS library is loaded
+if (typeof XLSX !== "undefined") {
+    console.log("✅ SheetJS library loaded successfully");
+} else {
+    console.error("❌ SheetJS library NOT loaded - Excel import will not work");
+}
+
+// Check if addCampaignUser function exists
+if (typeof addCampaignUser === "function") {
+    console.log("✅ addCampaignUser function is available");
+} else {
+    console.error("❌ addCampaignUser function NOT found");
+}
 function updateCounts() {
     const accountCount = document.querySelectorAll('.account-checkbox:checked').length;
     const userCount = document.querySelectorAll('.user-checkbox:checked').length;
 
     document.getElementById('accountCount').textContent = accountCount;
     document.getElementById('userCount').textContent = userCount;
+
 }
+
 
 function selectAllAccounts() {
     const checkboxes = document.querySelectorAll('.account-checkbox');
     const allChecked = Array.from(checkboxes).every(cb => cb.checked);
     checkboxes.forEach(cb => cb.checked = !allChecked);
     updateCounts();
+
 }
+
 
 function selectAllUsers() {
     const checkboxes = document.querySelectorAll('.user-checkbox');
     const allChecked = Array.from(checkboxes).every(cb => cb.checked);
     checkboxes.forEach(cb => cb.checked = !allChecked);
     updateCounts();
+    updateSelectedCount();
 }
 
+
 document.querySelectorAll('.account-checkbox, .user-checkbox').forEach(cb => {
-    cb.addEventListener('change', updateCounts);
+    cb.addEventListener('change', function() {
+        updateCounts();
+        if (cb.classList.contains('user-checkbox')) {
+            updateSelectedCount();
+        }
+    });
 });
 
 updateCounts();
 
-// CSV Import
-function handleCSVUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    // Validate file type
-    const validExtensions = ['.csv', '.xls', '.xlsx'];
-    const fileName = file.name.toLowerCase();
-    const isValid = validExtensions.some(ext => fileName.endsWith(ext));
-
-    const status = document.getElementById('importStatus');
-    status.style.display = 'block';
-    status.className = 'alert alert-info m-3';
-
-    if (!isValid) {
-        status.className = 'alert alert-danger m-3';
-        status.innerHTML = '<i class="bi bi-x-circle"></i> Invalid file type. Please use CSV, XLS, or XLSX files.';
-        event.target.value = '';
-        return;
-    }
-
-    status.innerHTML = `<i class="bi bi-hourglass-split"></i> Processing ${file.name}...`;
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    fetch('/users/import-csv', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-    })
-    .then(data => {
-        if (data.success) {
-            status.className = 'alert alert-success m-3';
-            let message = `<i class="bi bi-check-circle"></i> Successfully imported ${data.count} user${data.count !== 1 ? 's' : ''}!`;
-            if (data.skipped) {
-                message += ` (${data.skipped} row${data.skipped !== 1 ? 's' : ''} skipped)`;
-            }
-            message += ' Reloading...';
-            status.innerHTML = message;
-            setTimeout(() => window.location.reload(), 1500);
-        } else {
-            status.className = 'alert alert-danger m-3';
-            status.innerHTML = `<i class="bi bi-x-circle"></i> Error: ${data.error || 'Unknown error'}`;
-        }
-    })
-    .catch(error => {
-        console.error('Import error:', error);
-        status.className = 'alert alert-danger m-3';
-        status.innerHTML = `<i class="bi bi-x-circle"></i> Network error: ${error.message || 'Failed to upload file'}`;
-    })
-    .finally(() => {
-        // Reset file input
-        event.target.value = '';
-    });
-}
+// CSV Import - REMOVED: This function was for general user import, not campaign-specific
+// Campaign users are handled by handleFileImport() below
 
 // Text Formatting
 function insertFormat(tag) {
@@ -311,7 +509,9 @@ function insertFormat(tag) {
     const cursorPos = start + tag.length + 2 + (selectedText ? selectedText.length : 0);
     textarea.setSelectionRange(cursorPos, cursorPos);
     textarea.focus();
+
 }
+
 
 function insertEmoji(emoji) {
     const textarea = document.getElementById('message');
@@ -323,20 +523,678 @@ function insertEmoji(emoji) {
     const cursorPos = start + emoji.length;
     textarea.setSelectionRange(cursorPos, cursorPos);
     textarea.focus();
+
 }
+
 
 // Media Preview
 function previewMedia(event) {
     const file = event.target.files[0];
+    console.log("Selected file:", file);
     if (file) {
         document.getElementById('mediaFileName').textContent = file.name;
         document.getElementById('mediaPreview').style.display = 'block';
     }
+
 }
+
 
 function clearMedia() {
     document.getElementById('mediaFile').value = '';
     document.getElementById('mediaPreview').style.display = 'none';
+
+}
+
+
+// ========================================================================
+// CAMPAIGN USERS MANAGEMENT
+// ========================================================================
+
+// campaignUsers is already defined globally at the top of the script
+
+function updateUserCount() {
+    const count = campaignUsers.length;
+    document.getElementById('userCount').textContent = count;
+    
+    // Show/hide table vs empty message
+    const table = document.getElementById('campaignUsersTable').parentElement;
+    const message = document.getElementById('noUsersMessage');
+    
+    if (count > 0) {
+        table.style.display = 'block';
+        message.style.display = 'none';
+    } else {
+        table.style.display = 'none';
+        message.style.display = 'block';
+    }
+}
+
+function updateSelectedCount() {
+    const checkboxes = document.querySelectorAll('.user-checkbox:checked');
+    const selectedCount = checkboxes.length;
+    const countElement = document.getElementById('selectedCount');
+    const deleteBtn = document.getElementById('deleteSelectedUsersBtn');
+    
+    if (countElement) {
+        countElement.textContent = selectedCount;
+    }
+    
+    if (deleteBtn) {
+        deleteBtn.disabled = selectedCount === 0;
+    }
+}
+
+
+function addCampaignUser(username, user_id, phone, priority = 1) {
+    console.log("Adding campaign user:", {username, user_id, phone, priority});
+    const user = {
+        id: Date.now(), // temporary ID
+        username: username,
+        user_id: user_id,
+        phone: phone,
+        priority: priority
+    };
+    
+    campaignUsers.push(user);
+    renderCampaignUsers();
+    updateUserCount();
+    updateSelectedCount();
+}
+
+
+function removeCampaignUser(tempId) {
+    campaignUsers = campaignUsers.filter(user => user.id !== tempId);
+    renderCampaignUsers();
+    updateUserCount();
+    updateSelectedCount();
+}
+
+function deleteSelectedCampaignUsers() {
+    const checkboxes = document.querySelectorAll('.user-checkbox:checked');
+    if (checkboxes.length === 0) {
+        alert('Please select users to delete');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete ${checkboxes.length} user(s)?`)) {
+        return;
+    }
+    
+    const selectedIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+    campaignUsers = campaignUsers.filter(user => !selectedIds.includes(user.id));
+    
+    renderCampaignUsers();
+    updateUserCount();
+    updateSelectedCount();
+    
+    // Clear "select all" checkbox
+    const selectAll = document.getElementById('selectAllUsers');
+    if (selectAll) {
+        selectAll.checked = false;
+    }
+}
+
+
+function renderCampaignUsers() {
+    const tbody = document.getElementById('campaignUsersBody');
+    tbody.innerHTML = '';
+    
+    campaignUsers.forEach(user => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>
+                <input type="checkbox" class="form-check-input user-checkbox" name="campaign_users" value="${user.id}" onchange="updateSelectedCount()">
+            </td>
+            <td>@${user.username || 'N/A'}</td>
+            <td>${user.user_id || ''}</td>
+            <td>${user.phone || ''}</td>
+            <td>
+                <span class="badge bg-info">${user.priority}</span>
+            </td>
+            <td>
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeCampaignUser(${user.id})">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+
+    // Update selected count after rendering
+    updateSelectedCount();
+}
+
+
+function filterCampaignUsers() {
+    const usernameFilter = document.getElementById('filterUsername').value.toLowerCase();
+    const userIdFilter = document.getElementById('filterUserId').value.toLowerCase();
+    const priorityFilter = document.getElementById('filterPriority').value;
+    
+    const rows = document.querySelectorAll('#campaignUsersBody tr');
+    
+    rows.forEach(row => {
+        const username = row.cells[1].textContent.toLowerCase();
+        const userId = row.cells[2].textContent.toLowerCase();
+        const priority = row.cells[3].textContent;
+        
+        const matchUsername = !usernameFilter || username.includes(usernameFilter);
+        const matchUserId = !userIdFilter || userId.includes(userIdFilter);
+        const matchPriority = !priorityFilter || priority.includes(priorityFilter);
+        
+        row.style.display = matchUsername && matchUserId && matchPriority ? '' : 'none';
+    });
+
+}
+
+
+function clearCampaignFilters() {
+    document.getElementById('filterUsername').value = '';
+    document.getElementById('filterUserId').value = '';
+    document.getElementById('filterPriority').value = '';
+    filterCampaignUsers();
+
+}
+
+
+function toggleAllCampaignUsers(checkbox) {
+    const checkboxes = document.querySelectorAll('.user-checkbox');
+    checkboxes.forEach(cb => cb.checked = checkbox.checked);
+    updateSelectedCount();
+}
+
+
+// Enhanced debugging for handleFileImport
+function handleFileImport(event) {
+    console.log("=== FILE IMPORT DEBUG START ===");
+    console.log("1. Function called, event:", event);
+    console.log("1a. Event target:", event.target);
+    console.log("1b. Event target files:", event.target.files);
+    
+    const file = event.target.files[0];
+    console.log("2. Selected file:", file);
+    
+    if (!file) {
+        console.log("3. No file selected, exiting");
+        alert("No file selected. Please select a CSV or Excel file.");
+        return;
+    }
+    
+    console.log("3. File details:", {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified
+    });
+    
+    const status = document.getElementById('importStatus');
+    if (!status) {
+        console.error("4. Import status element not found!");
+        return;
+    }
+    
+    status.style.display = 'block';
+    status.className = 'alert alert-info m-3';
+    status.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing...';
+    
+    const fileName = file.name.toLowerCase();
+    const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.xlsm');
+    
+    console.log("5. File type detection:", {
+        fileName: fileName,
+        isExcel: isExcel,
+        xlsxLibraryAvailable: typeof XLSX !== 'undefined'
+    });
+    
+    if (isExcel) {
+        if (typeof XLSX === 'undefined') {
+            console.error("6. XLSX library not loaded! Cannot parse Excel files.");
+            status.className = 'alert alert-danger m-3';
+            status.innerHTML = '<i class="bi bi-x-circle"></i> Error: Excel library not loaded. Please refresh the page.';
+            return;
+        }
+        
+        console.log("6. Processing as Excel file...");
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+            console.log("7. FileReader onload triggered for Excel");
+            try {
+                const data = new Uint8Array(e.target.result);
+                console.log("8. Data read, size:", data.length);
+                
+                const workbook = XLSX.read(data, {type: 'array'});
+                console.log("9. Workbook parsed, sheets:", workbook.SheetNames);
+                
+                const wsname = workbook.SheetNames[0];
+                const ws = workbook.Sheets[wsname];
+                console.log("10. Using worksheet:", wsname);
+                
+                const jsonData = XLSX.utils.sheet_to_json(ws, {header: 1});
+                console.log("11. Excel data as JSON:", jsonData);
+                
+                if (!jsonData || jsonData.length === 0) {
+                    console.log("12. No data found in Excel file");
+                    status.className = 'alert alert-warning m-3';
+                    status.innerHTML = '<i class="bi bi-exclamation-triangle"></i> No data found in file';
+                    return;
+                }
+                
+                let imported = 0;
+                let skipped = 0;
+                
+                // Process rows (skip header)
+                for (let i = 1; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if (!row || row.length === 0) {
+                        console.log(`13. Row ${i} is empty, skipping`);
+                        skipped++;
+                        continue;
+                    }
+                    
+                    const username = row[0] ? String(row[0]).trim() : '';
+                    const user_id = row[1] ? String(row[1]).trim() : '';
+                    const phone = row[2] ? String(row[2]).trim() : '';
+                    
+                    console.log(`14. Row ${i} data:`, {username, user_id, phone});
+                    
+                    const cleanUsername = username ? username.replace(/@+/g, '') : '';
+                    
+                    if (cleanUsername || user_id || phone) {
+                        console.log(`15. Adding user from row ${i}`);
+                        
+                        // Check if addCampaignUser exists
+                        if (typeof addCampaignUser === 'function') {
+                            addCampaignUser(cleanUsername, user_id, phone, 1);
+                            imported++;
+                        } else {
+                            console.error("16. addCampaignUser function not found!");
+                            status.className = 'alert alert-danger m-3';
+                            status.innerHTML = '<i class="bi bi-x-circle"></i> Error: User addition function not found';
+                            return;
+                        }
+                    } else {
+                        console.log(`17. Row ${i} has no valid data, skipping`);
+                        skipped++;
+                    }
+                }
+                
+                console.log(`18. Import complete: ${imported} imported, ${skipped} skipped`);
+                status.className = 'alert alert-success m-3';
+                status.innerHTML = `<i class="bi bi-check-circle"></i> Imported ${imported} users from Excel! (${skipped} rows skipped)`;
+                
+                // Update selected count after import
+                updateSelectedCount();
+                
+                setTimeout(() => {
+                    status.style.display = 'none';
+                }, 5000);
+                
+            } catch (error) {
+                console.error('19. Excel processing error:', error);
+                status.className = 'alert alert-danger m-3';
+                status.innerHTML = `<i class="bi bi-x-circle"></i> Error reading Excel: ${error.message}`;
+            }
+        };
+        
+        reader.onerror = function(error) {
+            console.error("20. FileReader error:", error);
+            status.className = 'alert alert-danger m-3';
+            status.innerHTML = '<i class="bi bi-x-circle"></i> Error reading file';
+        };
+        
+        console.log("21. Starting to read Excel file...");
+        reader.readAsArrayBuffer(file);
+        
+    } else {
+        // CSV handling
+        console.log("6. Processing as CSV file...");
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+            console.log("7. FileReader onload triggered for CSV");
+            try {
+                const text = e.target.result;
+                console.log("8. CSV text length:", text.length);
+                console.log("9. First 200 chars:", text.substring(0, 200));
+                
+                const lines = text.split('\n');
+                console.log("10. Total lines in CSV:", lines.length);
+                
+                if (lines.length < 2) {
+                    console.log("11. CSV file has no data rows");
+                    status.className = 'alert alert-warning m-3';
+                    status.innerHTML = '<i class="bi bi-exclamation-triangle"></i> CSV file appears to be empty';
+                    return;
+                }
+                
+                console.log("12. CSV Header:", lines[0]);
+                
+                let imported = 0;
+                let skipped = 0;
+                
+                // Process data rows
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) {
+                        console.log(`13. Line ${i} is empty, skipping`);
+                        skipped++;
+                        continue;
+                    }
+                    
+                    console.log(`14. Processing line ${i}:`, line);
+                    
+                    const columns = line.split(',').map(col => col.trim());
+                    const username = columns[0] || '';
+                    const user_id = columns[1] || '';
+                    const phone = columns[2] || '';
+                    
+                    console.log(`15. Line ${i} parsed:`, {username, user_id, phone});
+                    
+                    const cleanUsername = username ? username.replace(/@+/g, '') : '';
+                    
+                    if (cleanUsername || user_id || phone) {
+                        console.log(`16. Adding user from line ${i}`);
+                        
+                        if (typeof addCampaignUser === 'function') {
+                            addCampaignUser(cleanUsername, user_id, phone, 1);
+                            imported++;
+                        } else {
+                            console.error("17. addCampaignUser function not found!");
+                            status.className = 'alert alert-danger m-3';
+                            status.innerHTML = '<i class="bi bi-x-circle"></i> Error: User addition function not found';
+                            return;
+                        }
+                    } else {
+                        console.log(`18. Line ${i} has no valid data, skipping`);
+                        skipped++;
+                    }
+                }
+                
+                console.log(`19. Import complete: ${imported} imported, ${skipped} skipped`);
+                status.className = 'alert alert-success m-3';
+                status.innerHTML = `<i class="bi bi-check-circle"></i> Imported ${imported} users from CSV! (${skipped} rows skipped)`;
+                
+                // Update selected count after import
+                updateSelectedCount();
+                
+                setTimeout(() => {
+                    status.style.display = 'none';
+                }, 5000);
+                
+            } catch (error) {
+                console.error('20. CSV processing error:', error);
+                status.className = 'alert alert-danger m-3';
+                status.innerHTML = `<i class="bi bi-x-circle"></i> Error reading CSV: ${error.message}`;
+            }
+        };
+        
+        reader.onerror = function(error) {
+            console.error("21. FileReader error:", error);
+            status.className = 'alert alert-danger m-3';
+            status.innerHTML = '<i class="bi bi-x-circle"></i> Error reading file';
+        };
+        
+        console.log("22. Starting to read CSV file...");
+        reader.readAsText(file);
+    }
+    
+    console.log("=== FILE IMPORT DEBUG END ===");
+}
+
+// Make the function globally available for onclick handlers
+console.log("handleFileImport function defined and assigned to window");
+window.handleFileImport = handleFileImport;
+
+// Test function for debugging
+window.testFileImportSetup = function() {
+    console.log("🧪 Testing file import setup...");
+    const csvUpload = document.getElementById("csvUpload");
+    const importButton = document.getElementById("importCsvButton");
+    
+    console.log("CSV Upload element:", csvUpload);
+    console.log("Import Button element:", importButton);
+    
+    if (csvUpload) {
+        console.log("CSV Upload has onchange:", csvUpload.onchange !== null);
+        console.log("CSV Upload has data-handler-attached:", csvUpload.getAttribute('data-handler-attached'));
+    }
+    
+    if (importButton) {
+        console.log("Import Button has onclick:", importButton.onclick !== null);
+        console.log("Import Button has data-handler-attached:", importButton.getAttribute('data-handler-attached'));
+    }
+    
+    // Try to trigger button click programmatically
+    if (importButton) {
+        console.log("🧪 Simulating button click...");
+        importButton.click();
+    }
+};
+
+// Setup file import handler - only for file input, button is handled separately
+function setupFileImportHandler() {
+    const csvUpload = document.getElementById("csvUpload");
+    
+    if (!csvUpload) {
+        setTimeout(setupFileImportHandler, 500);
+        return;
+    }
+    
+    // Remove existing handlers
+    csvUpload.onchange = null;
+    
+    // Add the handler
+        csvUpload.addEventListener("change", function(event) {
+        if (event.target.files && event.target.files.length > 0) {
+            handleFileImport(event);
+        }
+        }, false);
+        
+    // Also set onchange as backup
+    csvUpload.onchange = function(event) {
+        if (event.target.files && event.target.files.length > 0) {
+            handleFileImport(event);
+        }
+    };
+}
+
+// Setup when DOM is ready - multiple methods for reliability
+(function() {
+    console.log("📄 Initializing file import handlers...");
+    console.log("📄 Document ready state:", document.readyState);
+    
+    function init() {
+        console.log("📄 Running initialization...");
+    setupFileImportHandler();
+    }
+    
+    // Method 1: If DOM is already loaded
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        console.log("📄 DOM already ready, initializing immediately");
+        setTimeout(init, 100); // Small delay to ensure everything is ready
+    } else {
+        // Method 2: Wait for DOMContentLoaded
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log("📄 DOMContentLoaded fired, initializing");
+            init();
+        });
+    }
+    
+    // Method 3: Fallback after window load
+    window.addEventListener('load', function() {
+        console.log("📄 Window load fired, checking handlers...");
+        const csvUpload = document.getElementById("csvUpload");
+        const importButton = document.getElementById("importCsvButton");
+        if (csvUpload && importButton) {
+            // Check if handlers are attached
+            const hasHandler = csvUpload.onchange !== null || csvUpload.getAttribute('data-handler-attached') === 'true';
+            if (!hasHandler) {
+                console.log("⚠️ Handlers not attached, retrying...");
+                init();
+            } else {
+                console.log("✅ Handlers already attached");
+            }
+        }
+    });
+    
+    // Method 4: Final fallback after delay
+setTimeout(function() {
+        console.log("⏱️ Delayed setup attempt (final fallback)");
+        const csvUpload = document.getElementById("csvUpload");
+        const importButton = document.getElementById("importCsvButton");
+        if (csvUpload && importButton) {
+            const hasHandler = csvUpload.onchange !== null || csvUpload.getAttribute('data-handler-attached') === 'true';
+            if (!hasHandler) {
+                console.log("⚠️ Handlers still not attached, final retry...");
+                init();
+            }
+        }
+    }, 2000);
+})();
+
+
+
+function submitAddUser() {
+    const username = document.getElementById('modalUsername').value.trim();
+    const user_id = document.getElementById('modalUserId').value.trim();
+    const phone = document.getElementById('modalPhone').value.trim();
+    const priority = parseInt(document.getElementById('modalPriority').value);
+    
+    // Validation
+    if (!username && !user_id && !phone) {
+        alert('Please provide at least one field (username, user ID, or phone)');
+        return;
+    }
+    
+    // Clean username
+    const cleanUsername = username.replace('@', '');
+    
+    // Add user
+    addCampaignUser(cleanUsername, user_id, phone, priority);
+    updateSelectedCount();
+    
+    // Clear form
+    document.getElementById('addUserForm').reset();
+    
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('addUserModal'));
+    modal.hide();
+
+}
+
+// prepareCampaignData is already defined globally at the top of the script
+
+
+// Initialize
+updateUserCount();
+updateSelectedCount();
+
+// Proxy management
+let proxies = {{ proxies|tojson|safe }};
+
+// Load proxies on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadProxies();
+});
+
+function loadProxies() {
+    const proxiesList = document.getElementById('proxiesList');
+    if (!proxies || Object.keys(proxies).length === 0) {
+        proxiesList.innerHTML = '<div class="text-center text-muted py-3"><i class="bi bi-shield-lock"></i><p class="mt-2 mb-0">No proxies configured</p><small>Add proxies in <a href="/proxies">Proxy Management</a></small></div>';
+        return;
+    }
+    
+    let html = '';
+    for (const [proxyId, proxy] of Object.entries(proxies)) {
+        const statusClass = proxy.status === 'working' ? 'success' : proxy.status === 'failed' ? 'danger' : 'secondary';
+        html += `
+            <div class="form-check mb-2">
+                <input class="form-check-input proxy-checkbox" type="checkbox"
+                       name="proxies" value="${proxyId}" id="proxy${proxyId}"
+                       onchange="updateProxyCount()">
+                <label class="form-check-label" for="proxy${proxyId}">
+                    <div>
+                        <strong>${proxyId}</strong>
+                        <span class="badge bg-${statusClass} ms-2">${proxy.status || 'untested'}</span>
+                        <br>
+                        <small class="text-muted">${proxy.type}://${proxy.host}:${proxy.port}</small>
+                        ${proxy.test_ip ? `<br><small class="text-info">IP: ${proxy.test_ip}</small>` : ''}
+                    </div>
+                </label>
+            </div>
+        `;
+    }
+    proxiesList.innerHTML = html;
+}
+
+function selectAllProxies() {
+    const checkboxes = document.querySelectorAll('.proxy-checkbox');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    checkboxes.forEach(cb => cb.checked = !allChecked);
+    updateProxyCount();
+}
+
+function updateProxyCount() {
+    const count = document.querySelectorAll('.proxy-checkbox:checked').length;
+    document.getElementById('proxyCount').textContent = count;
+}
+
+async function checkProxyIPs() {
+    const selectedCheckboxes = document.querySelectorAll('.proxy-checkbox:checked');
+    if (selectedCheckboxes.length === 0) {
+        alert('Please select at least one proxy to check');
+        return;
+    }
+    
+    const proxyIds = Array.from(selectedCheckboxes).map(cb => cb.value);
+    const resultsDiv = document.getElementById('proxyIPResults');
+    const ipListDiv = document.getElementById('proxyIPList');
+    
+    resultsDiv.style.display = 'block';
+    ipListDiv.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div> Checking...';
+    
+    try {
+        const response = await fetch('/api/campaign/check-proxy-ips', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({proxy_ids: proxyIds})
+        });
+        
+        // Check if response is OK
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(`HTTP ${response.status}: ${text.substring(0, 100)}`);
+        }
+        
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            throw new Error(`Expected JSON but got ${contentType}. Response: ${text.substring(0, 200)}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            let html = '';
+            for (const [proxyId, ipData] of Object.entries(result.ips)) {
+                if (ipData.error) {
+                    html += `<div><strong>${proxyId}:</strong> <span class="text-danger">Error: ${ipData.error}</span></div>`;
+                } else {
+                    html += `<div><strong>${proxyId}:</strong> ${ipData.ip || 'Failed'} ${ipData.country ? `(${ipData.country})` : ''}</div>`;
+                }
+            }
+            ipListDiv.innerHTML = html;
+        } else {
+            ipListDiv.innerHTML = `<div class="text-danger">Error: ${result.error || 'Failed to check IPs'}</div>`;
+        }
+    } catch (error) {
+        ipListDiv.innerHTML = `<div class="text-danger">Error: ${error.message}</div>`;
+    }
 }
 </script>
 {% endblock %}

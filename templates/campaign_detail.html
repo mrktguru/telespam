@@ -13,6 +13,10 @@
         <button class="btn btn-primary" onclick="startCampaign()">
             <i class="bi bi-play-fill"></i> Start Campaign
         </button>
+        {% elif campaign.status == 'running' %}
+        <button class="btn btn-danger" onclick="stopCampaign()">
+            <i class="bi bi-stop-fill"></i> Stop Campaign
+        </button>
         {% endif %}
         <a href="{{ url_for('campaigns') }}" class="btn btn-outline-secondary">Back to Campaigns</a>
     </div>
@@ -55,6 +59,8 @@
                             <span class="badge bg-success">Completed</span>
                         {% elif campaign.status == 'failed' %}
                             <span class="badge bg-danger">Failed</span>
+                        {% elif campaign.status == 'stopped' %}
+                            <span class="badge bg-warning">Stopped</span>
                         {% else %}
                             <span class="badge bg-secondary">{{ campaign.status }}</span>
                         {% endif %}
@@ -173,6 +179,29 @@ function startCampaign() {
     });
 }
 
+function stopCampaign() {
+    if (!confirm('Are you sure you want to stop this campaign? The process will stop after the current message is sent.')) {
+        return;
+    }
+    
+    fetch("{{ url_for('stop_campaign', campaign_id=campaign.id) }}", {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Campaign stop requested. The campaign will stop after the current message is sent.');
+            // Reload after a short delay to show updated status
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to stop campaign'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+    });
+}
+
 function updateProgress() {
     fetch("{{ url_for('campaign_progress', campaign_id=campaign.id) }}")
     .then(response => response.json())
@@ -198,6 +227,11 @@ function updateProgress() {
             }
         } else if (data.status === 'failed') {
             badgeClass = 'bg-danger';
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+        } else if (data.status === 'stopped') {
+            badgeClass = 'bg-warning';
             if (pollingInterval) {
                 clearInterval(pollingInterval);
             }
