@@ -2131,6 +2131,79 @@ def add_proxy():
     return redirect(url_for('proxies_list'))
 
 
+@app.route('/api/campaign/check-proxy-ips', methods=['POST'])
+def check_proxy_ips():
+    """Check IP addresses through selected proxies"""
+    # Check authentication manually to return JSON error instead of HTML redirect
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'error': 'Authentication required'}), 401
+    
+    try:
+        data = request.get_json()
+        proxy_ids = data.get('proxy_ids', [])
+        
+        if not proxy_ids:
+            return jsonify({'success': False, 'error': 'No proxy IDs provided'}), 400
+        
+        import asyncio
+        import aiohttp
+        
+        async def check_all_proxies():
+            results = {}
+            
+            for proxy_id in proxy_ids:
+                proxy = proxy_manager.get_proxy(proxy_id)
+                if not proxy:
+                    results[proxy_id] = {'ip': None, 'error': 'Proxy not found'}
+                    continue
+                
+                try:
+                    # Prepare proxy URL
+                    if proxy.get('username') and proxy.get('password'):
+                        proxy_url = f"{proxy['type']}://{proxy['username']}:{proxy['password']}@{proxy['host']}:{proxy['port']}"
+                    else:
+                        proxy_url = f"{proxy['type']}://{proxy['host']}:{proxy['port']}"
+                    
+                    # Check IP through proxy
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            'https://api.ipify.org?format=json',
+                            proxy=proxy_url,
+                            timeout=aiohttp.ClientTimeout(total=10)
+                        ) as response:
+                            if response.status == 200:
+                                ip_data = await response.json()
+                                # Try to get country info
+                                try:
+                                    async with session.get(
+                                        f"https://ipapi.co/{ip_data['ip']}/json/",
+                                        proxy=proxy_url,
+                                        timeout=aiohttp.ClientTimeout(total=5)
+                                    ) as geo_response:
+                                        if geo_response.status == 200:
+                                            geo_data = await geo_response.json()
+                                            results[proxy_id] = {
+                                                'ip': ip_data.get('ip'),
+                                                'country': geo_data.get('country_name') or geo_data.get('country_code', 'Unknown')
+                                            }
+                                        else:
+                                            results[proxy_id] = {'ip': ip_data.get('ip'), 'country': None}
+                                except:
+                                    results[proxy_id] = {'ip': ip_data.get('ip'), 'country': None}
+                            else:
+                                results[proxy_id] = {'ip': None, 'error': f'HTTP {response.status}'}
+                except Exception as e:
+                    results[proxy_id] = {'ip': None, 'error': str(e)}
+            
+            return results
+        
+        ips = asyncio.run(check_all_proxies())
+        return jsonify({'success': True, 'ips': ips})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
 # ============================================================================
 # API ROUTES
 # ============================================================================

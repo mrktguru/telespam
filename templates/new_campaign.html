@@ -1156,9 +1156,26 @@ async function checkProxyIPs() {
     try {
         const response = await fetch('/api/campaign/check-proxy-ips', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'same-origin',
             body: JSON.stringify({proxy_ids: proxyIds})
         });
+        
+        // Check if response is OK
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(`HTTP ${response.status}: ${text.substring(0, 100)}`);
+        }
+        
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            throw new Error(`Expected JSON but got ${contentType}. Response: ${text.substring(0, 200)}`);
+        }
         
         const result = await response.json();
         
