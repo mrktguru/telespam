@@ -133,8 +133,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         # Find user by priority: ID (1) -> Username (2) -> Phone (3)
         target = None
         
-        # Priority 1: User ID
-        user_id_value = None  # Store converted user_id for fallback
+        # Priority 1: User ID (if provided)
         if user.get('user_id'):
             try:
                 # Convert user_id to int (can be string from DB)
@@ -163,16 +162,16 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
                             print(f"DEBUG: ✓ Found user by ID using GetUsersRequest: {user_id_value}")
                         else:
-                            # Can't get access_hash, but don't set target yet - try username/phone first
+                            # Can't get access_hash, will try username/phone
                             print(f"DEBUG: GetUsersRequest returned empty for ID {user_id_value}, will try username/phone")
                     except Exception as e2:
                         print(f"DEBUG: GetUsersRequest failed for ID {user_id_value}: {e2}, will try username/phone")
             except (ValueError, TypeError) as e:
-                print(f"DEBUG: Invalid user_id format: {user.get('user_id')} - {e}")
+                print(f"DEBUG: Invalid user_id format: {user.get('user_id')} - {e}, will try username/phone")
                 # user_id is invalid, continue to try username/phone
                 pass
             except Exception as e:
-                print(f"DEBUG: Failed to process user_id {user.get('user_id')}: {e}")
+                print(f"DEBUG: Failed to process user_id {user.get('user_id')}: {e}, will try username/phone")
                 # Continue to try username/phone
                 pass
 
