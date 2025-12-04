@@ -196,14 +196,20 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 print(f"DEBUG: Failed to find user by phone {phone_num}: {e}")
                 pass
 
-        # Last resort: if we have user_id but couldn't find user by ID/username/phone, try direct send
-        if not target and user_id_value is not None:
-            print(f"DEBUG: All methods failed, trying direct send with user_id: {user_id_value}")
-            target = user_id_value
-
+        # Don't try direct send by user_id - it requires access_hash which we don't have
+        # If all methods failed, return error instead of trying to send to invalid entity
         if not target:
             await client.disconnect()
-            return False, 'User not found'
+            # Build error message with available identifiers
+            identifiers = []
+            if user.get('user_id'):
+                identifiers.append(f"ID: {user.get('user_id')}")
+            if user.get('username'):
+                identifiers.append(f"Username: {user.get('username')}")
+            if user.get('phone'):
+                identifiers.append(f"Phone: {user.get('phone')}")
+            error_msg = f"User not found ({', '.join(identifiers)})"
+            return False, error_msg
 
         # Send message with or without media, using HTML parsing
         if media_path and media_type:
