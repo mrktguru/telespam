@@ -80,12 +80,13 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         error_details = []
 
         # Try user_id first (most precise identifier)
-        # Telethon can send to ID if user is in recent dialogs or has access_hash
         if user.get('user_id'):
             user_id = int(user['user_id'])
-            user_identifier = f"ID {user_id}"
-            # Use ID directly - Telethon will have access_hash if interacted before
-            target = user_id
+            try:
+                target = await client.get_entity(user_id)
+                user_identifier = f"ID {user_id}"
+            except Exception as e:
+                error_details.append(f"user_id {user_id}: {str(e)}")
 
         # Try username if no user_id
         if not target and user.get('username'):
