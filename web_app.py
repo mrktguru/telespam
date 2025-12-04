@@ -130,108 +130,82 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 print(f"⚠ Account {account.get('phone')} ({account_id}) marked as unauthorized")
             return False, 'Account not authorized - session expired or invalid'
 
-        # Find user by priority: ID (1) -> Username (2) -> Phone (3)
+        # Find user by ID only (from XLS table)
         target = None
         
-        # Priority 1: User ID (if provided)
-        if user.get('user_id'):
+        if not user.get('user_id'):
+            await client.disconnect()
+            return False, 'User ID is required'
+        
+        try:
+            # Convert user_id to int (can be string from DB)
+            user_id_str = str(user['user_id']).strip()
+            if not user_id_str:
+                await client.disconnect()
+                return False, 'User ID is empty'
+            
+            user_id_value = int(user_id_str)
+            print(f"DEBUG: Attempting to find user by ID: {user_id_value} (original: {user.get('user_id')})")
+            
+            # Try to get entity by ID - this works if user is in contacts or was contacted before
             try:
-                # Convert user_id to int (can be string from DB)
-                user_id_str = str(user['user_id']).strip()
-                if not user_id_str:
-                    raise ValueError("Empty user_id")
-                
-                user_id_value = int(user_id_str)
-                print(f"DEBUG: Attempting to find user by ID: {user_id_value} (original: {user.get('user_id')})")
-                
-                # Try to get entity by ID - this works if user is in contacts or was contacted before
+                target = await client.get_entity(user_id_value)
+                print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id_value}")
+            except (ValueError, TypeError) as ve:
+                # If get_entity fails with ValueError (user not found), try other methods
+                print(f"DEBUG: get_entity failed for ID {user_id_value}: {ve}, trying alternative methods...")
                 try:
-                    target = await client.get_entity(user_id_value)
-                    print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id_value}")
-                except (ValueError, TypeError) as ve:
-                    # If get_entity fails with ValueError (user not found), try other methods
-                    print(f"DEBUG: get_entity failed for ID {user_id_value}: {ve}, trying alternative methods...")
-                    try:
-                        from telethon.tl.types import InputPeerUser
-                        from telethon.tl.functions.users import GetUsersRequest
-                        
-                        # Try to get user info to get access_hash
-                        users_result = await client(GetUsersRequest([user_id_value]))
-                        if users_result and len(users_result) > 0:
-                            user_obj = users_result[0]
-                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                            print(f"DEBUG: ✓ Found user by ID using GetUsersRequest: {user_id_value}")
-                        else:
-                            # Can't get access_hash, will try username/phone
-                            print(f"DEBUG: GetUsersRequest returned empty for ID {user_id_value}, will try username/phone")
-                    except Exception as e2:
-                        print(f"DEBUG: GetUsersRequest failed for ID {user_id_value}: {e2}, will try username/phone")
-            except (ValueError, TypeError) as e:
-                print(f"DEBUG: Invalid user_id format: {user.get('user_id')} - {e}, will try username/phone")
-                # user_id is invalid, continue to try username/phone
-                pass
+                    from telethon.tl.types import InputPeerUser
+                    from telethon.tl.functions.users import GetUsersRequest
+                    
+                    # Try to get user info to get access_hash
+                    users_result = await client(GetUsersRequest([user_id_value]))
+                    if users_result and len(users_result) > 0:
+                        user_obj = users_result[0]
+                        target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                        print(f"DEBUG: ✓ Found user by ID using GetUsersRequest: {user_id_value}")
+                    else:
+                        # Can't get access_hash
+                        print(f"DEBUG: GetUsersRequest returned empty for ID {user_id_value}")
+                        await client.disconnect()
+                        return False, f'User not found by ID: {user_id_value}'
+                except Exception as e2:
+                    print(f"DEBUG: GetUsersRequest failed for ID {user_id_value}: {e2}")
+                    await client.disconnect()
+                    return False, f'User not found by ID: {user_id_value} ({str(e2)})'
+        except (ValueError, TypeError) as e:
+            await client.disconnect()
+            return False, f'Invalid user_id format: {user.get("user_id")} - {str(e)}'
             except Exception as e:
-                print(f"DEBUG: Failed to process user_id {user.get('user_id')}: {e}, will try username/phone")
-                # Continue to try username/phone
-                pass
+            await client.disconnect()
+            return False, f'Failed to process user_id {user.get("user_id")}: {str(e)}'
 
-        # Priority 2: Username (only if ID not found or not provided)
-        if not target and user.get('username'):
-            username = user['username'].lstrip('@')
-            try:
-                target = await client.get_entity(username)
-                print(f"DEBUG: Found user by username: {username}")
-            except Exception as e:
-                print(f"DEBUG: Failed to find user by username {username}: {e}")
-                pass
-
-        # Priority 3: Phone (only if ID and Username not found or not provided)
-        if not target and user.get('phone'):
-            phone_num = user['phone']
-            try:
-                target = await client.get_entity(phone_num)
-                print(f"DEBUG: Found user by phone: {phone_num}")
-            except Exception as e:
-                print(f"DEBUG: Failed to find user by phone {phone_num}: {e}")
-                pass
-
-        # Don't try direct send by user_id - it requires access_hash which we don't have
-        # If all methods failed, return error instead of trying to send to invalid entity
         if not target:
             await client.disconnect()
-            # Build error message with available identifiers
-            identifiers = []
-            if user.get('user_id'):
-                identifiers.append(f"ID: {user.get('user_id')}")
-            if user.get('username'):
-                identifiers.append(f"Username: {user.get('username')}")
-            if user.get('phone'):
-                identifiers.append(f"Phone: {user.get('phone')}")
-            error_msg = f"User not found ({', '.join(identifiers)})"
-            return False, error_msg
+            return False, f'User not found by ID: {user.get("user_id")}'
 
         # Send message with or without media, using HTML parsing
         try:
-            if media_path and media_type:
-                media_file = Path(media_path)
-                if media_file.exists():
-                    print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
-                    # Send with media - use file path directly
-                    if media_type == 'photo':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'video':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'audio':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                else:
-                    print(f"DEBUG: Media file not found: {media_path}")
-                    # File doesn't exist, send text only
-                    await client.send_message(target, message_text, parse_mode='html')
+        if media_path and media_type:
+            media_file = Path(media_path)
+            if media_file.exists():
+                print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+                # Send with media - use file path directly
+                if media_type == 'photo':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'video':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'audio':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
             else:
-                # Send text only with HTML formatting
+                print(f"DEBUG: Media file not found: {media_path}")
+                # File doesn't exist, send text only
                 await client.send_message(target, message_text, parse_mode='html')
+        else:
+            # Send text only with HTML formatting
+            await client.send_message(target, message_text, parse_mode='html')
             
-            await client.disconnect()
+        await client.disconnect()
             return True, None
         except ValueError as ve:
             # Handle "Could not find the input entity" error - try fallback methods
@@ -279,7 +253,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             await client.send_message(fallback_target, message_text, parse_mode='html')
                         await client.disconnect()
                         print(f"DEBUG: Successfully sent using fallback method")
-                        return True, None
+        return True, None
                     except Exception as e2:
                         await client.disconnect()
                         return False, f'Could not send to user (fallback also failed): {str(e2)}'
@@ -618,9 +592,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -851,15 +825,15 @@ def new_campaign():
             account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
             if account:
                 account_id = account.get('id')
-                # Generate new ID: acc_{phone}_{campaign_id}
+                    # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
-                
-                # Update account with new ID and campaign_id
-                sheets_manager.update_account(account_id, {
-                    'new_id': new_account_id,
-                    'campaign_id': campaign_id
-                })
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    
+                    # Update account with new ID and campaign_id
+                    sheets_manager.update_account(account_id, {
+                        'new_id': new_account_id,
+                        'campaign_id': campaign_id
+                    })
         flash('Campaign created! Starting...', 'success')
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
 
@@ -1338,7 +1312,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-                acc['rate_limits'] = stats
+        acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
