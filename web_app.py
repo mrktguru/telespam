@@ -134,57 +134,46 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         target = None
         
         # Priority 1: User ID
+        user_id_value = None  # Store converted user_id for fallback
         if user.get('user_id'):
-            user_id = None  # Initialize user_id variable
             try:
                 # Convert user_id to int (can be string from DB)
                 user_id_str = str(user['user_id']).strip()
                 if not user_id_str:
                     raise ValueError("Empty user_id")
                 
-                user_id = int(user_id_str)
-                print(f"DEBUG: Attempting to find user by ID: {user_id} (original: {user.get('user_id')})")
+                user_id_value = int(user_id_str)
+                print(f"DEBUG: Attempting to find user by ID: {user_id_value} (original: {user.get('user_id')})")
                 
                 # Try to get entity by ID - this works if user is in contacts or was contacted before
                 try:
-                    target = await client.get_entity(user_id)
-                    print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id}")
+                    target = await client.get_entity(user_id_value)
+                    print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id_value}")
                 except (ValueError, TypeError) as ve:
                     # If get_entity fails with ValueError (user not found), try other methods
-                    print(f"DEBUG: get_entity failed for ID {user_id}: {ve}, trying alternative methods...")
+                    print(f"DEBUG: get_entity failed for ID {user_id_value}: {ve}, trying alternative methods...")
                     try:
                         from telethon.tl.types import InputPeerUser
                         from telethon.tl.functions.users import GetUsersRequest
                         
                         # Try to get user info to get access_hash
-                        users_result = await client(GetUsersRequest([user_id]))
+                        users_result = await client(GetUsersRequest([user_id_value]))
                         if users_result and len(users_result) > 0:
                             user_obj = users_result[0]
                             target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                            print(f"DEBUG: ✓ Found user by ID using GetUsersRequest: {user_id}")
+                            print(f"DEBUG: ✓ Found user by ID using GetUsersRequest: {user_id_value}")
                         else:
-                            # If we can't get access_hash, try direct send with user_id
-                            # Telegram will resolve it if the user was contacted before
-                            target = user_id
-                            print(f"DEBUG: Using user_id directly (no access_hash): {user_id}")
+                            # Can't get access_hash, but don't set target yet - try username/phone first
+                            print(f"DEBUG: GetUsersRequest returned empty for ID {user_id_value}, will try username/phone")
                     except Exception as e2:
-                        print(f"DEBUG: GetUsersRequest failed for ID {user_id}: {e2}")
-                        # Last resort: use user_id directly - Telegram may resolve it
-                        target = user_id
-                        print(f"DEBUG: Using user_id directly as fallback: {user_id}")
+                        print(f"DEBUG: GetUsersRequest failed for ID {user_id_value}: {e2}, will try username/phone")
             except (ValueError, TypeError) as e:
                 print(f"DEBUG: Invalid user_id format: {user.get('user_id')} - {e}")
                 # user_id is invalid, continue to try username/phone
                 pass
             except Exception as e:
                 print(f"DEBUG: Failed to process user_id {user.get('user_id')}: {e}")
-                # If user_id was successfully converted, try using it directly
-                if user_id is not None:
-                    try:
-                        target = user_id
-                        print(f"DEBUG: Using user_id directly after error: {user_id}")
-                    except:
-                        pass
+                # Continue to try username/phone
                 pass
 
         # Priority 2: Username (only if ID not found or not provided)
@@ -206,6 +195,11 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             except Exception as e:
                 print(f"DEBUG: Failed to find user by phone {phone_num}: {e}")
                 pass
+
+        # Last resort: if we have user_id but couldn't find user by ID/username/phone, try direct send
+        if not target and user_id_value is not None:
+            print(f"DEBUG: All methods failed, trying direct send with user_id: {user_id_value}")
+            target = user_id_value
 
         if not target:
             await client.disconnect()
