@@ -42,8 +42,16 @@ proxy_manager = ProxyManager()
 # CAMPAIGN RUNNER
 # ============================================================================
 
-async def send_message_to_user(account, user, message_text, media_path=None, media_type=None):
+async def send_message_to_user(account, user, message_text, media_path=None, media_type=None, campaign_proxies=None):
     """Send message to user via Telegram with optional media
+
+    Args:
+        account: Account dictionary
+        user: User dictionary
+        message_text: Message text
+        media_path: Optional media file path
+        media_type: Optional media type
+        campaign_proxies: Optional list of proxy IDs from campaign settings (takes priority over account proxy)
 
     Returns: (success: bool, error_msg: str)
     """
@@ -53,19 +61,52 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
     if not session_file.exists():
         return False, f'Session file not found: {session_file}'
 
-    # Get proxy if assigned to account
+    # Get proxy - priority: campaign_proxies > account proxy
     proxy = None
-    if account.get('use_proxy') and account.get('proxy'):
+    proxy_id = None
+    
+    # First, try campaign proxies (round-robin)
+    if campaign_proxies and len(campaign_proxies) > 0:
+        # Use round-robin: select proxy based on account phone hash
+        import hashlib
+        account_hash = int(hashlib.md5(phone.encode()).hexdigest(), 16)
+        proxy_id = campaign_proxies[account_hash % len(campaign_proxies)]
+        proxy_data = proxy_manager.get_proxy(proxy_id)
+        if proxy_data:
+            import socks
+            proxy_type_map = {
+                'socks5': socks.SOCKS5,
+                'http': socks.HTTP
+            }
+            proxy = (
+                proxy_type_map.get(proxy_data['type'], socks.SOCKS5),
+                proxy_data['host'],
+                proxy_data['port'],
+                True,  # rdns
+                proxy_data.get('username'),
+                proxy_data.get('password')
+            )
+            print(f"DEBUG: Using campaign proxy {proxy_id} for account {phone}")
+    
+    # Fallback to account proxy if no campaign proxy
+    if not proxy and account.get('use_proxy') and account.get('proxy'):
         proxy_id = account['proxy']
         proxy_data = proxy_manager.get_proxy(proxy_id)
         if proxy_data:
-            proxy = {
-                'proxy_type': proxy_data['type'],
-                'addr': proxy_data['host'],
-                'port': proxy_data['port'],
-                'username': proxy_data.get('username'),
-                'password': proxy_data.get('password')
+            import socks
+            proxy_type_map = {
+                'socks5': socks.SOCKS5,
+                'http': socks.HTTP
             }
+            proxy = (
+                proxy_type_map.get(proxy_data['type'], socks.SOCKS5),
+                proxy_data['host'],
+                proxy_data['port'],
+                True,  # rdns
+                proxy_data.get('username'),
+                proxy_data.get('password')
+            )
+            print(f"DEBUG: Using account proxy {proxy_id} for account {phone}")
 
     client = TelegramClient(
         str(session_file),
@@ -220,6 +261,7 @@ def run_campaign_task(campaign_id):
         media_path = settings.get('media_path')
         media_type = settings.get('media_type')
         account_phones = settings.get('accounts', [])
+        campaign_proxies = settings.get('proxies', [])  # Get proxy IDs from campaign settings
 
         # Normalize phone numbers for comparison (remove +, spaces, etc.)
         def normalize_phone(phone):
@@ -358,7 +400,7 @@ def run_campaign_task(campaign_id):
             # Send message via Telegram
             try:
                 success, error_msg = loop.run_until_complete(
-                    send_message_to_user(account, user, message, media_path, media_type)
+                    send_message_to_user(account, user, message, media_path, media_type, campaign_proxies)
                 )
 
                 if success:
@@ -758,6 +800,7 @@ def new_campaign():
     # Get accounts and users for form
     accounts = sheets_manager.get_all_accounts()
     users = sheets_manager.users
+    proxies = proxy_manager.get_all_proxies()
 
     # Debug: log all accounts being sent to template
     print(f"DEBUG new_campaign: Found {len(accounts)} accounts to display")
@@ -770,7 +813,7 @@ def new_campaign():
     print(f"DEBUG new_campaign: {len(available_accounts)} accounts available (excluding limited/unauthorized)")
     
     # Pass both all accounts and available accounts to template
-    return render_template('new_campaign.html', accounts=accounts, available_accounts=available_accounts, users=users)
+    return render_template('new_campaign.html', accounts=accounts, available_accounts=available_accounts, users=users, proxies=proxies)
 
 
 @app.route('/campaigns/<int:campaign_id>')
