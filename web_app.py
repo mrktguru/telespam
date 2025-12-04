@@ -76,53 +76,72 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
 
         # Find user by username, user_id or phone
         target = None
+        user_identifier = None
+        error_details = []
+
+        # Try username first (most reliable)
         if user.get('username'):
             username = user['username'].lstrip('@')
             try:
                 target = await client.get_entity(username)
+                user_identifier = f"@{username}"
             except Exception as e:
-                pass
+                error_details.append(f"username @{username}: {str(e)}")
 
-        if not target and user.get('user_id'):
-            try:
-                target = await client.get_entity(int(user['user_id']))
-            except Exception as e:
-                pass
-
+        # Try phone if no username
         if not target and user.get('phone'):
             phone_num = user['phone']
             try:
                 target = await client.get_entity(phone_num)
+                user_identifier = phone_num
             except Exception as e:
-                pass
+                error_details.append(f"phone {phone_num}: {str(e)}")
+
+        # For user_id - try to send directly without get_entity
+        # Telethon can send to ID if user is in recent dialogs
+        if not target and user.get('user_id'):
+            user_id = int(user['user_id'])
+            user_identifier = f"ID {user_id}"
+            # We'll try to send directly using the ID
+            # If user has interacted before, Telethon will have the access_hash
+            target = user_id  # Use ID directly
 
         if not target:
             await client.disconnect()
-            return False, 'User not found'
+            error_msg = 'User not found. ' + '; '.join(error_details) if error_details else 'No valid user identifier provided'
+            return False, error_msg
 
         # Send message with or without media, using HTML parsing
-        if media_path and media_type:
-            media_file = Path(media_path)
-            if media_file.exists():
-                print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
-                # Send with media - use file path directly
-                if media_type == 'photo':
-                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                elif media_type == 'video':
-                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                elif media_type == 'audio':
-                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+        try:
+            if media_path and media_type:
+                media_file = Path(media_path)
+                if media_file.exists():
+                    print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+                    # Send with media - use file path directly
+                    if media_type == 'photo':
+                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                    elif media_type == 'video':
+                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                    elif media_type == 'audio':
+                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                else:
+                    print(f"DEBUG: Media file not found: {media_path}")
+                    # File doesn't exist, send text only
+                    await client.send_message(target, message_text, parse_mode='html')
             else:
-                print(f"DEBUG: Media file not found: {media_path}")
-                # File doesn't exist, send text only
+                # Send text only with HTML formatting
                 await client.send_message(target, message_text, parse_mode='html')
-        else:
-            # Send text only with HTML formatting
-            await client.send_message(target, message_text, parse_mode='html')
-            
-        await client.disconnect()
 
-        return True, None
+            await client.disconnect()
+            return True, None
+
+        except ValueError as e:
+            # This happens when Telethon can't resolve the peer (no access_hash)
+            await client.disconnect()
+            error_msg = f"User not found by {user_identifier}: {str(e)}"
+            if isinstance(target, int):
+                error_msg += " (Cannot send to user ID without prior interaction. Please use username or phone instead.)"
+            return False, error_msg
 
     except FloodWaitError as e:
         await client.disconnect()
