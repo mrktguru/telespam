@@ -746,10 +746,10 @@ def new_campaign():
                     # Generate new ID: acc_{phone}_{campaign_id}
                 # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                new_account_id = f"acc_{phone_clean}_{campaign_id}"
                     
-                    # Update account with new ID and campaign_id
-                    sheets_manager.update_account(account_id, {
+                # Update account with new ID and campaign_id
+                sheets_manager.update_account(account_id, {
                         'new_id': new_account_id,
                         'campaign_id': campaign_id
                     })
