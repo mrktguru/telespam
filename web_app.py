@@ -176,7 +176,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         except (ValueError, TypeError) as e:
             await client.disconnect()
             return False, f'Invalid user_id format: {user.get("user_id")} - {str(e)}'
-            except Exception as e:
+        except Exception as e:
             await client.disconnect()
             return False, f'Failed to process user_id {user.get("user_id")}: {str(e)}'
 
@@ -186,7 +186,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
 
         # Send message with or without media, using HTML parsing
         try:
-        if media_path and media_type:
+            if media_path and media_type:
             media_file = Path(media_path)
             if media_file.exists():
                 print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
