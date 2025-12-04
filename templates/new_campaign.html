@@ -1088,5 +1088,96 @@ function submitAddUser() {
 // Initialize
 updateUserCount();
 updateSelectedCount();
+
+// Proxy management
+let proxies = {{ proxies|tojson|safe }};
+
+// Load proxies on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadProxies();
+});
+
+function loadProxies() {
+    const proxiesList = document.getElementById('proxiesList');
+    if (!proxies || Object.keys(proxies).length === 0) {
+        proxiesList.innerHTML = '<div class="text-center text-muted py-3"><i class="bi bi-shield-lock"></i><p class="mt-2 mb-0">No proxies configured</p><small>Add proxies in <a href="/proxies">Proxy Management</a></small></div>';
+        return;
+    }
+    
+    let html = '';
+    for (const [proxyId, proxy] of Object.entries(proxies)) {
+        const statusClass = proxy.status === 'working' ? 'success' : proxy.status === 'failed' ? 'danger' : 'secondary';
+        html += `
+            <div class="form-check mb-2">
+                <input class="form-check-input proxy-checkbox" type="checkbox"
+                       name="proxies" value="${proxyId}" id="proxy${proxyId}"
+                       onchange="updateProxyCount()">
+                <label class="form-check-label" for="proxy${proxyId}">
+                    <div>
+                        <strong>${proxyId}</strong>
+                        <span class="badge bg-${statusClass} ms-2">${proxy.status || 'untested'}</span>
+                        <br>
+                        <small class="text-muted">${proxy.type}://${proxy.host}:${proxy.port}</small>
+                        ${proxy.test_ip ? `<br><small class="text-info">IP: ${proxy.test_ip}</small>` : ''}
+                    </div>
+                </label>
+            </div>
+        `;
+    }
+    proxiesList.innerHTML = html;
+}
+
+function selectAllProxies() {
+    const checkboxes = document.querySelectorAll('.proxy-checkbox');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    checkboxes.forEach(cb => cb.checked = !allChecked);
+    updateProxyCount();
+}
+
+function updateProxyCount() {
+    const count = document.querySelectorAll('.proxy-checkbox:checked').length;
+    document.getElementById('proxyCount').textContent = count;
+}
+
+async function checkProxyIPs() {
+    const selectedCheckboxes = document.querySelectorAll('.proxy-checkbox:checked');
+    if (selectedCheckboxes.length === 0) {
+        alert('Please select at least one proxy to check');
+        return;
+    }
+    
+    const proxyIds = Array.from(selectedCheckboxes).map(cb => cb.value);
+    const resultsDiv = document.getElementById('proxyIPResults');
+    const ipListDiv = document.getElementById('proxyIPList');
+    
+    resultsDiv.style.display = 'block';
+    ipListDiv.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div> Checking...';
+    
+    try {
+        const response = await fetch('/api/campaign/check-proxy-ips', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({proxy_ids: proxyIds})
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            let html = '';
+            for (const [proxyId, ipData] of Object.entries(result.ips)) {
+                if (ipData.error) {
+                    html += `<div><strong>${proxyId}:</strong> <span class="text-danger">Error: ${ipData.error}</span></div>`;
+                } else {
+                    html += `<div><strong>${proxyId}:</strong> ${ipData.ip || 'Failed'} ${ipData.country ? `(${ipData.country})` : ''}</div>`;
+                }
+            }
+            ipListDiv.innerHTML = html;
+        } else {
+            ipListDiv.innerHTML = `<div class="text-danger">Error: ${result.error || 'Failed to check IPs'}</div>`;
+        }
+    } catch (error) {
+        ipListDiv.innerHTML = `<div class="text-danger">Error: ${error.message}</div>`;
+    }
+}
 </script>
 {% endblock %}
