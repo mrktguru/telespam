@@ -743,7 +743,6 @@ def new_campaign():
             account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
             if account:
                 account_id = account.get('id')
-                    # Generate new ID: acc_{phone}_{campaign_id}
                 # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
                 new_account_id = f"acc_{phone_clean}_{campaign_id}"
@@ -760,7 +759,18 @@ def new_campaign():
     accounts = sheets_manager.get_all_accounts()
     users = sheets_manager.users
 
-    return render_template('new_campaign.html', accounts=accounts, users=users)
+    # Debug: log all accounts being sent to template
+    print(f"DEBUG new_campaign: Found {len(accounts)} accounts to display")
+    for i, acc in enumerate(accounts):
+        print(f"DEBUG new_campaign: Account {i+1}: id={acc.get('id')}, phone={acc.get('phone')}, status={acc.get('status')}")
+    
+    # Filter out limited and unauthorized accounts for campaign selection
+    # But keep all accounts for display (user can see which ones are not available)
+    available_accounts = [acc for acc in accounts if acc.get('status') not in ['limited', 'unauthorized']]
+    print(f"DEBUG new_campaign: {len(available_accounts)} accounts available (excluding limited/unauthorized)")
+    
+    # Pass both all accounts and available accounts to template
+    return render_template('new_campaign.html', accounts=accounts, available_accounts=available_accounts, users=users)
 
 
 @app.route('/campaigns/<int:campaign_id>')
@@ -1200,10 +1210,21 @@ def accounts_list():
 
     print(f"DEBUG: Found {len(accounts)} accounts in storage")
     for i, acc in enumerate(accounts):
-        print(f"DEBUG: Account {i+1}: id={acc.get('id')}, phone={acc.get('phone')}, status={acc.get('status')}")
+        acc_id = acc.get('id', 'MISSING')
+        acc_phone = acc.get('phone', 'MISSING')
+        acc_status = acc.get('status', 'MISSING')
+        acc_first_name = acc.get('first_name', 'MISSING')
+        print(f"DEBUG: Account {i+1}: id={acc_id}, phone={acc_phone}, status={acc_status}, first_name={acc_first_name}")
+        print(f"DEBUG: Account {i+1} full data: {acc}")
+
+    # Don't filter - show all accounts, even if they have missing fields
+    # The template handles missing fields with 'or' operators
+    filtered_accounts = accounts
+    
+    print(f"DEBUG: After processing: {len(filtered_accounts)} accounts to display")
 
     # Add rate limit stats (handle errors gracefully)
-    for acc in accounts:
+    for acc in filtered_accounts:
         try:
             acc_id = acc.get('id', '')
             if acc_id:
@@ -1215,8 +1236,8 @@ def accounts_list():
             print(f"Warning: Could not get rate limits for account {acc.get('id')}: {e}")
             acc['rate_limits'] = None
 
-    print(f"DEBUG: Returning {len(accounts)} accounts to template")
-    return render_template('accounts.html', accounts=accounts)
+    print(f"DEBUG: Returning {len(filtered_accounts)} accounts to template")
+    return render_template('accounts.html', accounts=filtered_accounts)
 
 
 @app.route('/accounts/delete/<account_id>', methods=['POST'])
