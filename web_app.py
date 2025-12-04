@@ -510,9 +510,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -746,10 +746,10 @@ def new_campaign():
                     # Generate new ID: acc_{phone}_{campaign_id}
                 # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
                     
-                # Update account with new ID and campaign_id
-                sheets_manager.update_account(account_id, {
+                    # Update account with new ID and campaign_id
+                    sheets_manager.update_account(account_id, {
                         'new_id': new_account_id,
                         'campaign_id': campaign_id
                     })
@@ -760,7 +760,18 @@ def new_campaign():
     accounts = sheets_manager.get_all_accounts()
     users = sheets_manager.users
 
-    return render_template('new_campaign.html', accounts=accounts, users=users)
+    # Debug: log all accounts being sent to template
+    print(f"DEBUG new_campaign: Found {len(accounts)} accounts to display")
+    for i, acc in enumerate(accounts):
+        print(f"DEBUG new_campaign: Account {i+1}: id={acc.get('id')}, phone={acc.get('phone')}, status={acc.get('status')}")
+    
+    # Filter out limited and unauthorized accounts for campaign selection
+    # But keep all accounts for display (user can see which ones are not available)
+    available_accounts = [acc for acc in accounts if acc.get('status') not in ['limited', 'unauthorized']]
+    print(f"DEBUG new_campaign: {len(available_accounts)} accounts available (excluding limited/unauthorized)")
+    
+    # Pass both all accounts and available accounts to template
+    return render_template('new_campaign.html', accounts=accounts, available_accounts=available_accounts, users=users)
 
 
 @app.route('/campaigns/<int:campaign_id>')
@@ -1219,7 +1230,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-                acc['rate_limits'] = stats
+        acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:

@@ -204,21 +204,31 @@ mike_wilson,555444333,+5554443333</pre>
                         Select All
                     </button>
                 </div>
-                <div class="card-body">
+                <div class="card-body" style="max-height: 500px; overflow-y: auto;">
                     {% if accounts %}
+                        <p class="text-muted small mb-2">Total accounts: {{ accounts|length }}</p>
                         {% for account in accounts %}
                         <div class="form-check mb-3">
+                            {% if account.status in ['limited', 'unauthorized'] %}
+                                <input class="form-check-input account-checkbox" type="checkbox"
+                                       name="accounts" value="{{ account.phone }}" id="acc{{ loop.index }}" disabled
+                                       title="Account is {{ account.status }}, cannot be used for campaigns">
+                            {% else %}
                             <input class="form-check-input account-checkbox" type="checkbox"
                                    name="accounts" value="{{ account.phone }}" id="acc{{ loop.index }}">
-                            <label class="form-check-label" for="acc{{ loop.index }}">
+                            {% endif %}
+                            <label class="form-check-label" for="acc{{ loop.index }}" style="{% if account.status in ['limited', 'unauthorized'] %}opacity: 0.6;{% endif %}">
                                 <div>
                                     <strong>{{ account.phone or 'N/A' }}</strong>
                                     <br>
                                     <small class="text-muted">{{ account.first_name }}</small>
                                     <br>
-                                    <span class="badge bg-{{ 'success' if account.status == 'active' else 'warning' }}">
+                                    <span class="badge bg-{{ 'success' if account.status == 'active' else 'warning' if account.status == 'warming' else 'danger' if account.status in ['limited', 'unauthorized'] else 'secondary' }}">
                                         {{ account.status }}
                                     </span>
+                                    {% if account.status in ['limited', 'unauthorized'] %}
+                                        <small class="text-muted d-block mt-1">(Not available for campaigns)</small>
+                                    {% endif %}
                                 </div>
                             </label>
                         </div>
