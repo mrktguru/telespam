@@ -261,6 +261,7 @@ def run_campaign_task(campaign_id):
         media_path = settings.get('media_path')
         media_type = settings.get('media_type')
         account_phones = settings.get('accounts', [])
+        campaign_proxies = settings.get('proxies', [])  # Get proxy IDs from campaign settings
 
         # Normalize phone numbers for comparison (remove +, spaces, etc.)
         def normalize_phone(phone):
