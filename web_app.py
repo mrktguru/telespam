@@ -135,6 +135,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         
         # Priority 1: User ID
         if user.get('user_id'):
+            user_id = None  # Initialize user_id variable
             try:
                 # Convert user_id to int (can be string from DB)
                 user_id_str = str(user['user_id']).strip()
@@ -171,17 +172,19 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                         # Last resort: use user_id directly - Telegram may resolve it
                         target = user_id
                         print(f"DEBUG: Using user_id directly as fallback: {user_id}")
-            except Exception as e:
-                    print(f"DEBUG: Unexpected error finding user by ID {user_id}: {e}")
-                    # Fallback: use user_id directly
-                    target = user_id
-                    print(f"DEBUG: Using user_id directly after error: {user_id}")
             except (ValueError, TypeError) as e:
                 print(f"DEBUG: Invalid user_id format: {user.get('user_id')} - {e}")
                 # user_id is invalid, continue to try username/phone
                 pass
             except Exception as e:
                 print(f"DEBUG: Failed to process user_id {user.get('user_id')}: {e}")
+                # If user_id was successfully converted, try using it directly
+                if user_id is not None:
+                    try:
+                        target = user_id
+                        print(f"DEBUG: Using user_id directly after error: {user_id}")
+                    except:
+                        pass
                 pass
 
         # Priority 2: Username (only if ID not found or not provided)
