@@ -130,59 +130,75 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 print(f"⚠ Account {account.get('phone')} ({account_id}) marked as unauthorized")
             return False, 'Account not authorized - session expired or invalid'
 
-        # Find user by ID only (from XLS table)
+        # Find user by user_id, username or phone (from XLS/CSV table)
         target = None
-        
-        if not user.get('user_id'):
-            await client.disconnect()
-            return False, 'User ID is required'
-        
-        try:
-            # Convert user_id to int (can be string from DB)
-            user_id_str = str(user['user_id']).strip()
-            if not user_id_str:
-                await client.disconnect()
-                return False, 'User ID is empty'
-            
-            user_id_value = int(user_id_str)
-            print(f"DEBUG: Attempting to find user by ID: {user_id_value} (original: {user.get('user_id')})")
-            
-            # Try to get entity by ID - this works if user is in contacts or was contacted before
+        user_identifier = None
+        error_details = []
+
+        # Try user_id first (most precise)
+        if user.get('user_id'):
             try:
-                target = await client.get_entity(user_id_value)
-                print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id_value}")
-            except (ValueError, TypeError) as ve:
-                # If get_entity fails with ValueError (user not found), try other methods
-                print(f"DEBUG: get_entity failed for ID {user_id_value}: {ve}, trying alternative methods...")
-                try:
-                    from telethon.tl.types import InputPeerUser
-                    from telethon.tl.functions.users import GetUsersRequest
-                    
-                    # Try to get user info to get access_hash
-                    users_result = await client(GetUsersRequest([user_id_value]))
-                    if users_result and len(users_result) > 0:
-                        user_obj = users_result[0]
-                        target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                        print(f"DEBUG: ✓ Found user by ID using GetUsersRequest: {user_id_value}")
-                    else:
-                        # Can't get access_hash
-                        print(f"DEBUG: GetUsersRequest returned empty for ID {user_id_value}")
-                        await client.disconnect()
-                        return False, f'User not found by ID: {user_id_value}'
-                except Exception as e2:
-                    print(f"DEBUG: GetUsersRequest failed for ID {user_id_value}: {e2}")
-                    await client.disconnect()
-                    return False, f'User not found by ID: {user_id_value} ({str(e2)})'
-        except (ValueError, TypeError) as e:
-            await client.disconnect()
-            return False, f'Invalid user_id format: {user.get("user_id")} - {str(e)}'
-        except Exception as e:
-            await client.disconnect()
-            return False, f'Failed to process user_id {user.get("user_id")}: {str(e)}'
+                # Convert user_id to int (can be string from DB)
+                user_id_str = str(user['user_id']).strip()
+                if user_id_str:
+                    user_id_value = int(user_id_str)
+                    user_identifier = f"ID {user_id_value}"
+                    print(f"DEBUG: Attempting to find user by ID: {user_id_value}")
+
+                    # Try to get entity by ID - this works if user is in contacts or was contacted before
+                    try:
+                        target = await client.get_entity(user_id_value)
+                        print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id_value}")
+                    except (ValueError, TypeError) as ve:
+                        # If get_entity fails with ValueError (user not found), try GetUsersRequest
+                        print(f"DEBUG: get_entity failed for ID {user_id_value}: {ve}, trying GetUsersRequest...")
+                        try:
+                            from telethon.tl.types import InputPeerUser
+                            from telethon.tl.functions.users import GetUsersRequest
+
+                            # Try to get user info to get access_hash
+                            users_result = await client(GetUsersRequest([user_id_value]))
+                            if users_result and len(users_result) > 0:
+                                user_obj = users_result[0]
+                                target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                                print(f"DEBUG: ✓ Found user by ID using GetUsersRequest: {user_id_value}")
+                            else:
+                                error_details.append(f"user_id {user_id_value}: GetUsersRequest returned empty")
+                                print(f"DEBUG: GetUsersRequest returned empty for ID {user_id_value}")
+                        except Exception as e2:
+                            error_details.append(f"user_id {user_id_value}: {str(e2)}")
+                            print(f"DEBUG: GetUsersRequest failed for ID {user_id_value}: {e2}")
+            except (ValueError, TypeError) as e:
+                error_details.append(f"user_id {user.get('user_id')}: invalid format - {str(e)}")
+            except Exception as e:
+                error_details.append(f"user_id {user.get('user_id')}: {str(e)}")
+
+        # Try username if user_id didn't work (fallback from CSV)
+        if not target and user.get('username'):
+            username = user['username'].lstrip('@')
+            user_identifier = f"@{username}"
+            try:
+                target = await client.get_entity(username)
+                print(f"DEBUG: ✓ Found user by username: @{username}")
+            except Exception as e:
+                error_details.append(f"username @{username}: {str(e)}")
+                print(f"DEBUG: Failed to find user by username @{username}: {e}")
+
+        # Try phone as last resort (fallback from CSV)
+        if not target and user.get('phone'):
+            phone_num = user['phone']
+            user_identifier = phone_num
+            try:
+                target = await client.get_entity(phone_num)
+                print(f"DEBUG: ✓ Found user by phone: {phone_num}")
+            except Exception as e:
+                error_details.append(f"phone {phone_num}: {str(e)}")
+                print(f"DEBUG: Failed to find user by phone {phone_num}: {e}")
 
         if not target:
             await client.disconnect()
-            return False, f'User not found by ID: {user.get("user_id")}'
+            error_msg = f'User not found. Tried: {"; ".join(error_details)}' if error_details else 'No valid user identifier provided (need user_id, username or phone)'
+            return False, error_msg
 
         # Send message with or without media, using HTML parsing
         try:
