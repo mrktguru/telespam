@@ -196,7 +196,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         except (ValueError, TypeError) as e:
             await client.disconnect()
             return False, f'Invalid user_id format: {user.get("user_id")} - {str(e)}'
-            except Exception as e:
+        except Exception as e:
             await client.disconnect()
             return False, f'Failed to process user_id {user.get("user_id")}: {str(e)}'
 
@@ -206,7 +206,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
 
         # Send message with or without media, using HTML parsing
         try:
-        if media_path and media_type:
+            if media_path and media_type:
             media_file = Path(media_path)
             if media_file.exists():
                 print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
@@ -558,9 +558,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-        # Mark as completed
-        db.update_campaign(campaign_id, status='completed')
-        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+            # Mark as completed
+            db.update_campaign(campaign_id, status='completed')
+            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -792,10 +792,10 @@ def new_campaign():
             if account:
                 account_id = account.get('id')
                     # Generate new ID: acc_{phone}_{campaign_id}
-                    phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
+                new_account_id = f"acc_{phone_clean}_{campaign_id}"
                     
-                    # Update account with new ID and campaign_id
+                # Update account with new ID and campaign_id
                 update_account(account_id, {
                         'new_id': new_account_id,
                         'campaign_id': campaign_id
@@ -973,7 +973,7 @@ def find_account_by_id_or_phone(account_id: str):
     
     # If not found, try to extract phone from ID format: acc_{phone}_{campaign_id}
     # or find among all accounts by matching phone
-        all_accounts = get_all_accounts()
+    all_accounts = get_all_accounts()
     
     # Try to extract phone from ID if it follows the pattern acc_{phone}_{campaign_id}
     if account_id.startswith('acc_'):
@@ -1278,9 +1278,9 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-        acc['rate_limits'] = stats
-            else:
-                acc['rate_limits'] = None
+                acc['rate_limits'] = stats
+                else:
+                    acc['rate_limits'] = None
         except Exception as e:
             print(f"Warning: Could not get rate limits for account {acc.get('id')}: {e}")
             acc['rate_limits'] = None
