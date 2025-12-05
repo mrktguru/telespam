@@ -151,8 +151,8 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             return False, 'Account not authorized - session expired or invalid'
 
         # Find user by ID only (from XLS table)
-        # Use the same approach as CLI: pass user_id directly to send_message
-        # Telethon will handle entity resolution automatically
+        # For sending to unknown users (not in contacts), we need to get access_hash
+        # Try multiple approaches to find user and get access_hash
         
         if not user.get('user_id'):
             await client.disconnect()
@@ -168,13 +168,18 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             user_id_value = int(user_id_str)
             print(f"DEBUG: Sending to user ID: {user_id_value} (original: {user.get('user_id')})")
             
+            # PRIORITY: USER_ID - pass directly to send_message/send_file
+            # This is the same approach as sender.py (CLI) - Telethon handles entity resolution
+            # Works for users in contacts, previously contacted, or accessible via API
+            print(f"DEBUG: Sending directly to user_id: {user_id_value} (same as CLI)")
+            
             # Send message with or without media, using HTML parsing
-            # Pass user_id directly to send_message/send_file - same as CLI does
+            # Pass user_id directly - Telethon will attempt to resolve automatically
             if media_path and media_type:
                 media_file = Path(media_path)
                 if media_file.exists():
                     print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
-                    # Send with media - use file path directly, pass user_id
+                    # Send with media - pass user_id directly
                     if media_type == 'photo':
                         await client.send_file(user_id_value, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
                     elif media_type == 'video':
@@ -192,8 +197,9 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             await client.disconnect()
             return True, None
         except (ValueError, TypeError) as e:
+            error_str = str(e)
             await client.disconnect()
-            return False, f'Invalid user_id format: {user.get("user_id")} - {str(e)}'
+            return False, f'Invalid user_id format: {user.get("user_id")} - {error_str}'
 
     except FloodWaitError as e:
         await client.disconnect()
