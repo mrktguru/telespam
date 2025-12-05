@@ -222,8 +222,8 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                     # File doesn't exist, send text only
                     await client.send_message(target, message_text, parse_mode='html')
             else:
-            # Send text only with HTML formatting
-            await client.send_message(target, message_text, parse_mode='html')
+                # Send text only with HTML formatting
+                await client.send_message(target, message_text, parse_mode='html')
             
             await client.disconnect()
             return True, None
