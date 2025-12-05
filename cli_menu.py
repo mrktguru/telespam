@@ -8,10 +8,8 @@ import sys
 import os
 import subprocess
 
-# Set mock storage mode
-os.environ['USE_MOCK_STORAGE'] = 'true'
-
-from mock_sheets import sheets_manager
+# Use database for accounts
+from database import db
 
 
 def print_header(text):
@@ -37,7 +35,9 @@ def show_dashboard():
 
     print_header("DASHBOARD")
 
-    accounts = sheets_manager.get_all_accounts()
+    accounts = db.get_all_accounts()
+    # Still use sheets_manager for users, dialogs, logs (not migrated yet)
+    from sheets_loader import sheets_manager
     users = sheets_manager.users
     dialogs = sheets_manager.dialogs
     logs = sheets_manager.logs[-10:]  # Last 10 logs
@@ -45,7 +45,9 @@ def show_dashboard():
     # Accounts summary
     print("\n📱 ACCOUNTS:")
     if accounts:
-        available = sheets_manager.get_available_accounts()
+        # Filter available accounts manually
+        from accounts import is_account_available
+        available = [acc for acc in accounts if is_account_available(acc)]
         print(f"   Total: {len(accounts)} | Available: {len(available)}")
         for acc in accounts[:5]:
             status_icon = "🟢" if acc.get('status') == 'active' else "🟡" if acc.get('status') == 'warming' else "🔴"
@@ -190,6 +192,7 @@ async def main_menu():
         elif choice == "10":
             confirm = input("⚠️  Clear ALL data? (yes/no): ").strip().lower()
             if confirm == 'yes':
+                from sheets_loader import sheets_manager
                 sheets_manager.clear_all_data()
                 print_success("All data cleared")
             else:
