@@ -19,10 +19,30 @@ from telethon.errors import FloodWaitError, UserPrivacyRestrictedError, PeerFloo
 from telethon.tl.functions.users import GetFullUserRequest
 
 from database import db
-from mock_sheets import sheets_manager
 from rate_limiter import RateLimiter
 from proxy_manager import ProxyManager
 import config
+
+# Account management - use database instead of mock_sheets
+def get_all_accounts():
+    """Get all accounts from database"""
+    return db.get_all_accounts()
+
+def get_account(account_id: str):
+    """Get account by ID from database"""
+    return db.get_account(account_id)
+
+def add_account(account: dict) -> bool:
+    """Add account to database"""
+    return db.add_account(account)
+
+def update_account(account_id: str, updates: dict) -> bool:
+    """Update account in database"""
+    return db.update_account(account_id, updates)
+
+def delete_account(account_id: str) -> bool:
+    """Delete account from database"""
+    return db.delete_account(account_id)
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -123,7 +143,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             # Mark account as unauthorized so it's not used in future campaigns
             account_id = account.get('id')
             if account_id:
-                sheets_manager.update_account(account_id, {
+                update_account(account_id, {
                     'status': 'unauthorized',
                     'last_used_at': datetime.now().isoformat()
                 })
@@ -176,7 +196,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         except (ValueError, TypeError) as e:
             await client.disconnect()
             return False, f'Invalid user_id format: {user.get("user_id")} - {str(e)}'
-        except Exception as e:
+            except Exception as e:
             await client.disconnect()
             return False, f'Failed to process user_id {user.get("user_id")}: {str(e)}'
 
@@ -186,27 +206,27 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
 
         # Send message with or without media, using HTML parsing
         try:
-            if media_path and media_type:
-                media_file = Path(media_path)
-                if media_file.exists():
-                    print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
-                    # Send with media - use file path directly
-                    if media_type == 'photo':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'video':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'audio':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                else:
-                    print(f"DEBUG: Media file not found: {media_path}")
-                    # File doesn't exist, send text only
-                    await client.send_message(target, message_text, parse_mode='html')
+        if media_path and media_type:
+            media_file = Path(media_path)
+            if media_file.exists():
+                print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+                # Send with media - use file path directly
+                if media_type == 'photo':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'video':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'audio':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
             else:
-                # Send text only with HTML formatting
+                print(f"DEBUG: Media file not found: {media_path}")
+                # File doesn't exist, send text only
                 await client.send_message(target, message_text, parse_mode='html')
+        else:
+            # Send text only with HTML formatting
+            await client.send_message(target, message_text, parse_mode='html')
             
-            await client.disconnect()
-            return True, None
+        await client.disconnect()
+        return True, None
         except ValueError as ve:
             # Handle "Could not find the input entity" error
             error_str = str(ve)
@@ -259,7 +279,7 @@ def run_campaign_task(campaign_id):
         
         # Get accounts (exclude limited and unauthorized accounts, but check if they can be restored)
         # Don't reload from file - use in-memory state which is always up-to-date
-        all_accounts = sheets_manager.get_all_accounts()
+        all_accounts = get_all_accounts()
         print(f"DEBUG Campaign {campaign_id}: Found {len(all_accounts)} total accounts in memory")
         accounts = []
         for acc in all_accounts:
@@ -288,7 +308,7 @@ def run_campaign_task(campaign_id):
                                 f'Account {acc_phone} limited status cleared after {hours_since_limit:.1f} hours, restoring to active',
                                 level='info'
                             )
-                            sheets_manager.update_account(acc.get('id'), {
+                            update_account(acc.get('id'), {
                                 'status': 'active',
                                 'last_used_at': datetime.now().isoformat()
                             })
@@ -452,7 +472,7 @@ def run_campaign_task(campaign_id):
                     # Update account stats
                     daily_sent = int(account.get('daily_sent', 0)) + 1
                     total_sent = int(account.get('total_sent', 0)) + 1
-                    sheets_manager.update_account(account.get('id'), {
+                    update_account(account.get('id'), {
                         'daily_sent': daily_sent,
                         'total_sent': total_sent,
                         'last_used_at': datetime.now().isoformat()
@@ -485,7 +505,7 @@ def run_campaign_task(campaign_id):
                             level='warning'
                         )
                         # Mark account as limited and move to next account
-                        sheets_manager.update_account(account.get('id'), {
+                        update_account(account.get('id'), {
                             'status': 'limited',
                             'last_used_at': datetime.now().isoformat()
                         })
@@ -502,7 +522,7 @@ def run_campaign_task(campaign_id):
                             level='warning'
                         )
                         # Mark account as limited and move to next account
-                        sheets_manager.update_account(account.get('id'), {
+                        update_account(account.get('id'), {
                             'status': 'limited',
                             'last_used_at': datetime.now().isoformat()
                         })
@@ -538,9 +558,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -631,7 +651,7 @@ def dashboard():
     user_id = session['user_id']
 
     # Get accounts
-    accounts = sheets_manager.get_all_accounts()
+    accounts = get_all_accounts()
 
     # Get users for outreach
     users = sheets_manager.users
@@ -711,7 +731,7 @@ def new_campaign():
         if not message and not media_path:
             flash('Please provide either a message or media file', 'warning')
             # Get accounts and users for form
-            accounts = sheets_manager.get_all_accounts()
+            accounts = get_all_accounts()
             users = sheets_manager.users
             return render_template('new_campaign.html', accounts=accounts, users=users)
 
@@ -720,7 +740,7 @@ def new_campaign():
         print(f"DEBUG: Selected account phones from form: {account_phones}")
         
         # Validate that phones exist in available accounts
-        all_accounts = sheets_manager.get_all_accounts()
+        all_accounts = get_all_accounts()
         print(f"DEBUG: Total accounts available: {len(all_accounts)}")
         valid_account_phones = []
         for phone in account_phones:
@@ -771,12 +791,12 @@ def new_campaign():
             account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
             if account:
                 account_id = account.get('id')
-                # Generate new ID: acc_{phone}_{campaign_id}
+                    # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
-                
-                # Update account with new ID and campaign_id
-                sheets_manager.update_account(account_id, {
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    
+                    # Update account with new ID and campaign_id
+                    update_account(account_id, {
                         'new_id': new_account_id,
                         'campaign_id': campaign_id
                     })
@@ -784,7 +804,7 @@ def new_campaign():
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
 
     # Get accounts and users for form
-    accounts = sheets_manager.get_all_accounts()
+    accounts = get_all_accounts()
     users = sheets_manager.users
     proxies = proxy_manager.get_all_proxies()
 
@@ -947,13 +967,13 @@ def find_account_by_id_or_phone(account_id: str):
     This handles cases where account ID was changed (e.g., acc_{phone}_{campaign_id})
     """
     # First try to find by exact ID
-    account = sheets_manager.get_account(account_id)
+    account = get_account(account_id)
     if account:
         return account
     
     # If not found, try to extract phone from ID format: acc_{phone}_{campaign_id}
     # or find among all accounts by matching phone
-    all_accounts = sheets_manager.get_all_accounts()
+        all_accounts = get_all_accounts()
     
     # Try to extract phone from ID if it follows the pattern acc_{phone}_{campaign_id}
     if account_id.startswith('acc_'):
@@ -1235,7 +1255,7 @@ def accounts_list():
     """List all accounts"""
     # Don't reload from file here - it overwrites in-memory changes
     # Only load on startup, changes are saved immediately
-    accounts = sheets_manager.get_all_accounts()
+    accounts = get_all_accounts()
 
     print(f"DEBUG: Found {len(accounts)} accounts in storage")
     for i, acc in enumerate(accounts):
@@ -1258,7 +1278,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-                acc['rate_limits'] = stats
+        acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
@@ -1274,7 +1294,7 @@ def accounts_list():
 def delete_account(account_id):
     """Delete account"""
     try:
-        success = sheets_manager.delete_account(account_id)
+        success = delete_account(account_id)
         
         if success:
             flash(f'Account {account_id} deleted successfully', 'success')
@@ -1291,7 +1311,7 @@ def delete_account(account_id):
 def get_account_profile_photo(account_id):
     """Get account profile photo"""
     try:
-        account = sheets_manager.get_account(account_id)
+        account = get_account(account_id)
         if not account:
             # Return 1x1 transparent pixel as placeholder
             from io import BytesIO
@@ -1360,7 +1380,7 @@ def get_account_profile_photo(account_id):
 @login_required
 def edit_account(account_id):
     """Edit account profile"""
-    account = sheets_manager.get_account(account_id)
+    account = get_account(account_id)
     
     if not account:
         flash('Account not found', 'danger')
@@ -1483,7 +1503,7 @@ def edit_account(account_id):
                     update_data['photo_count'] = result.get('photo_count', 0)
                 
                 print(f"DEBUG: Updating account with data: {update_data}")
-                sheets_manager.update_account(account_id, update_data)
+                update_account(account_id, update_data)
                 
                 flash('Profile updated successfully!', 'success')
             else:
@@ -1589,7 +1609,7 @@ def add_account_tdata():
         
         # Verify account was added (don't reload - in-memory state is correct)
         if result.get('success'):
-            accounts_after = sheets_manager.get_all_accounts()
+            accounts_after = get_all_accounts()
             print(f"DEBUG: Accounts after addition: {len(accounts_after)}")
             result['accounts_count'] = len(accounts_after)
         
@@ -1677,7 +1697,7 @@ def add_account_manual():
         
         # Verify account was added (don't reload - in-memory state is correct)
         if result.get('success'):
-            accounts_after = sheets_manager.get_all_accounts()
+            accounts_after = get_all_accounts()
             print(f"DEBUG: Accounts after manual addition: {len(accounts_after)}")
             result['accounts_count'] = len(accounts_after)
         
@@ -1777,10 +1797,9 @@ def add_account_authkey():
         
         result = asyncio.run(process())
         
-        # Verify account was added and reload data
+        # Verify account was added
         if result.get('success'):
-            sheets_manager._load_from_file()
-            accounts_after = sheets_manager.get_all_accounts()
+            accounts_after = get_all_accounts()
             print(f"DEBUG: Accounts after authkey addition: {len(accounts_after)}")
             result['accounts_count'] = len(accounts_after)
         
@@ -1795,7 +1814,7 @@ def add_account_authkey():
 def delete_account_photos(account_id):
     """Delete all profile photos from account"""
     try:
-        account = sheets_manager.get_account(account_id)
+        account = get_account(account_id)
         
         if not account:
             return jsonify({'success': False, 'error': 'Account not found'})
@@ -2198,7 +2217,7 @@ def check_proxy_ips():
 @login_required
 def api_stats():
     """Get system stats (JSON)"""
-    accounts = sheets_manager.get_all_accounts()
+    accounts = get_all_accounts()
     users = sheets_manager.users
     user_id = session['user_id']
     campaigns = db.get_user_campaigns(user_id)

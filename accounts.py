@@ -278,18 +278,20 @@ async def add_account(account_data: Dict) -> Dict:
             "proxy_pass": ""
         }
 
-        # Add to sheets
-        success = sheets_manager.add_account(account)
+        # Add to database
+        from database import db
+        from datetime import datetime
+        
+        # Ensure all required fields
+        account['added_at'] = account.get('added_at', datetime.now().isoformat())
+        account['last_used_at'] = account.get('last_used_at', datetime.now().isoformat())
+        account['daily_sent'] = account.get('daily_sent', 0)
+        account['total_sent'] = account.get('total_sent', 0)
+        account['flood_count'] = account.get('flood_count', 0)
+        
+        success = db.add_account(account)
 
         if success:
-            # Log the addition
-            sheets_manager.add_log({
-                "account_id": account_id,
-                "action": "account_added",
-                "result": "success",
-                "details": f"Account {account['phone']} added"
-            })
-
             return {
                 "success": True,
                 "account": account
@@ -297,7 +299,7 @@ async def add_account(account_data: Dict) -> Dict:
         else:
             return {
                 "success": False,
-                "error": "Failed to add account to sheets"
+                "error": "Failed to add account to database"
             }
 
     except Exception as e:
