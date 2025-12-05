@@ -198,7 +198,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 print(f"DEBUG: Using direct user_id: {user_id_value} (Telethon will attempt resolution)")
                 target = user_id_value
 
-        # Send message with or without media, using HTML parsing
+            # Send message with or without media, using HTML parsing
         if media_path and media_type:
             media_file = Path(media_path)
             if media_file.exists():
