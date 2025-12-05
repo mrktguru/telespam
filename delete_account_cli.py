@@ -7,10 +7,8 @@ import os
 import sys
 from pathlib import Path
 
-# Set mock storage mode
-os.environ['USE_MOCK_STORAGE'] = 'true'
-
-from mock_sheets import sheets_manager
+# Use database for accounts
+from database import db
 
 
 def print_header():
@@ -21,7 +19,7 @@ def print_header():
 
 def list_accounts():
     """List all accounts with index"""
-    accounts = sheets_manager.get_all_accounts()
+    accounts = db.get_all_accounts()
     
     if not accounts:
         print("✗ No accounts found in the system\n")
@@ -87,7 +85,7 @@ def main():
         return 1
     
     # Get account details for confirmation
-    account = sheets_manager.get_account(account_id)
+    account = db.get_account(account_id)
     if not account:
         print(f"\n✗ Account not found: {account_id}\n")
         return 1
@@ -112,7 +110,7 @@ def main():
         return 0
     
     # Delete account
-    success = sheets_manager.delete_account(account_id)
+    success = db.delete_account(account_id)
     
     if success:
         print(f"\n✓ Account {phone} deleted successfully!\n")

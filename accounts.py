@@ -10,7 +10,7 @@ from telethon.errors import (
     PhoneNumberBannedError
 )
 import config
-from sheets_loader import sheets_manager
+from database import db
 from proxy import get_client
 from uuid import uuid4
 
@@ -27,15 +27,16 @@ async def check_account_status(account_id: str) -> Dict:
     """
 
     try:
-        # Get account from sheets
-        account = sheets_manager.get_account(account_id)
+        # Get account from database
+        account = db.get_account(account_id)
         if not account:
             return {
                 "success": False,
                 "error": "Account not found"
             }
 
-        # Get settings for proxy
+        # Get settings for proxy (still from sheets_manager for now)
+        from sheets_loader import sheets_manager
         settings = sheets_manager.get_settings()
 
         # Create client
@@ -57,8 +58,8 @@ async def check_account_status(account_id: str) -> Dict:
 
         await client.disconnect()
 
-        # Update status in sheets
-        sheets_manager.update_account(account_id, {
+        # Update status in database
+        db.update_account(account_id, {
             "status": config.AccountStatus.ACTIVE,
             "last_used_at": datetime.now().isoformat()
         })
@@ -76,7 +77,7 @@ async def check_account_status(account_id: str) -> Dict:
 
     except PhoneNumberBannedError:
         # Account is banned
-        sheets_manager.update_account(account_id, {
+        db.update_account(account_id, {
             "status": config.AccountStatus.BANNED
         })
         return {
@@ -87,7 +88,7 @@ async def check_account_status(account_id: str) -> Dict:
 
     except SessionExpiredError:
         # Session expired
-        sheets_manager.update_account(account_id, {
+        db.update_account(account_id, {
             "status": config.AccountStatus.BANNED
         })
         return {
@@ -117,20 +118,21 @@ async def select_account_for_user(user_id: int, preferred_account_id: Optional[s
 
     # If preferred account is specified, check if it's available
     if preferred_account_id:
-        account = sheets_manager.get_account(preferred_account_id)
+        account = db.get_account(preferred_account_id)
         if account and is_account_available(account):
             return account
 
     # Check if we already have a dialog with this user
+    from sheets_loader import sheets_manager
     dialog = sheets_manager.get_dialog(user_id)
     if dialog and dialog.get('account_id'):
         # Use the same account for continuity
-        account = sheets_manager.get_account(dialog['account_id'])
+        account = db.get_account(dialog['account_id'])
         if account and is_account_available(account):
             return account
 
     # Get available accounts
-    available = sheets_manager.get_available_accounts()
+    available = get_available_accounts(limit=10)
 
     if not available:
         return None
@@ -175,6 +177,28 @@ def is_account_available(account: Dict) -> bool:
     return True
 
 
+def get_available_accounts(limit: int = 10) -> List[Dict]:
+    """
+    Get accounts available for sending
+
+    Args:
+        limit: Maximum number of accounts to return
+
+    Returns:
+        List of available account dicts
+    """
+    accounts = db.get_all_accounts()
+    
+    # Filter available accounts
+    available = [acc for acc in accounts if is_account_available(acc)]
+    
+    # Sort by daily_sent (ascending) to balance load
+    available.sort(key=lambda x: int(x.get('daily_sent', 0)))
+    
+    # Return limited number
+    return available[:limit]
+
+
 def increment_account_usage(account_id: str):
     """
     Increment account usage counters
@@ -183,14 +207,14 @@ def increment_account_usage(account_id: str):
         account_id: Account ID
     """
 
-    account = sheets_manager.get_account(account_id)
+    account = db.get_account(account_id)
     if not account:
         return
 
     daily_sent = int(account.get('daily_sent', 0)) + 1
     total_sent = int(account.get('total_sent', 0)) + 1
 
-    sheets_manager.update_account(account_id, {
+    db.update_account(account_id, {
         "daily_sent": daily_sent,
         "total_sent": total_sent,
         "last_used_at": datetime.now().isoformat()
@@ -211,10 +235,10 @@ def set_account_cooldown(account_id: str, hours: Optional[int] = None):
 
     cooldown_until = datetime.now() + timedelta(hours=hours)
 
-    account = sheets_manager.get_account(account_id)
+    account = db.get_account(account_id)
     flood_count = int(account.get('flood_count', 0)) + 1 if account else 1
 
-    sheets_manager.update_account(account_id, {
+    db.update_account(account_id, {
         "status": config.AccountStatus.COOLDOWN,
         "cooldown_until": cooldown_until.isoformat(),
         "flood_count": flood_count
@@ -230,7 +254,7 @@ def generate_account_id() -> str:
     """
 
     # Get existing accounts to find next ID
-    accounts = sheets_manager.get_all_accounts()
+    accounts = db.get_all_accounts()
 
     # Extract numeric IDs
     max_id = 0
@@ -322,7 +346,7 @@ async def delete_account(account_id: str) -> Dict:
 
     try:
         # Get account
-        account = sheets_manager.get_account(account_id)
+        account = db.get_account(account_id)
         if not account:
             return {
                 "success": False,
@@ -334,13 +358,16 @@ async def delete_account(account_id: str) -> Dict:
         if session_file:
             Path(session_file).unlink(missing_ok=True)
 
-        # TODO: Delete from sheets (sheets_manager doesn't have delete method yet)
-        # For now, just set status to banned
-        sheets_manager.update_account(account_id, {
-            "status": config.AccountStatus.BANNED
-        })
+        # Delete from database
+        success = db.delete_account(account_id)
+        if not success:
+            return {
+                "success": False,
+                "error": "Failed to delete account"
+            }
 
-        # Log the deletion
+        # Log the deletion (still using sheets_manager for logs)
+        from sheets_loader import sheets_manager
         sheets_manager.add_log({
             "account_id": account_id,
             "action": "account_deleted",

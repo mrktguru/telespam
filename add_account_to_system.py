@@ -105,14 +105,12 @@ async def add_account():
 
         await client.disconnect()
 
-        # Add to system
-        if use_mock:
-            from mock_sheets import sheets_manager
-        else:
-            from sheets_loader import sheets_manager
+        # Add to system - use database
+        from database import db
+        from datetime import datetime
 
         # Generate account ID
-        accounts = sheets_manager.get_all_accounts()
+        accounts = db.get_all_accounts()
         max_id = 0
         for acc in accounts:
             acc_id = acc.get('id', '')
@@ -126,8 +124,6 @@ async def add_account():
         account_id = f"acc_{max_id + 1}"
 
         # Prepare account data
-        from datetime import datetime
-
         account = {
             "id": account_id,
             "phone": me.phone,
@@ -137,21 +133,17 @@ async def add_account():
             "status": "active",  # Set as active for immediate use
             "daily_sent": 0,
             "total_sent": 0,
-            "cooldown_until": "",
+            "cooldown_until": None,
             "last_used_at": datetime.now().isoformat(),
             "added_at": datetime.now().isoformat(),
             "flood_count": 0,
             "use_proxy": False,
-            "proxy_type": "",
-            "proxy_host": "",
-            "proxy_port": "",
-            "proxy_user": "",
-            "proxy_pass": "",
+            "proxy": None,
             "notes": "Main account"
         }
 
-        # Add to storage
-        success = sheets_manager.add_account(account)
+        # Add to database
+        success = db.add_account(account)
 
         if success:
             print("=" * 60)
@@ -165,7 +157,8 @@ async def add_account():
             print()
 
             # Show summary
-            sheets_manager.print_summary()
+            all_accounts = db.get_all_accounts()
+            print(f"Total accounts in system: {len(all_accounts)}")
 
         else:
             print("❌ Failed to add account")
