@@ -53,6 +53,10 @@ campaign_stop_flags = {}
 # Global dictionary to store active registration sessions (phone -> TelegramClient)
 registration_sessions = {}
 
+# Cache for successfully resolved user entities (user_id -> InputPeerUser)
+# This avoids repeated GetUsersRequest calls for the same user
+user_entity_cache = {}
+
 # Initialize managers
 rate_limiter = RateLimiter()
 proxy_manager = ProxyManager()
@@ -187,39 +191,39 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
 
             # If GetUsersRequest didn't work, try get_entity (works if user in contacts or was contacted)
             if not target:
-                try:
+            try:
                     target = await client.get_entity(user_id_value)
                     print(f"DEBUG: ✓ Found user via get_entity: {user_id_value}")
-                except Exception as e:
+            except Exception as e:
                     print(f"DEBUG: get_entity failed: {e}")
 
             # Fallback: use user_id directly (Telethon will attempt to resolve)
-            if not target:
+        if not target:
                 print(f"DEBUG: Using direct user_id: {user_id_value} (Telethon will attempt resolution)")
                 target = user_id_value
 
-            # Send message with or without media, using HTML parsing
-            if media_path and media_type:
-                media_file = Path(media_path)
-                if media_file.exists():
-                    print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+        # Send message with or without media, using HTML parsing
+        if media_path and media_type:
+            media_file = Path(media_path)
+            if media_file.exists():
+                print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
                     # Send with media
-                    if media_type == 'photo':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'video':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'audio':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                else:
-                    print(f"DEBUG: Media file not found: {media_path}")
-                    # File doesn't exist, send text only
-                    await client.send_message(target, message_text, parse_mode='html')
+                if media_type == 'photo':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'video':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'audio':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
             else:
-                # Send text only with HTML formatting
+                print(f"DEBUG: Media file not found: {media_path}")
+                # File doesn't exist, send text only
                 await client.send_message(target, message_text, parse_mode='html')
+        else:
+            # Send text only with HTML formatting
+            await client.send_message(target, message_text, parse_mode='html')
             
-            await client.disconnect()
-            return True, None
+        await client.disconnect()
+        return True, None
         except (ValueError, TypeError) as e:
             error_str = str(e)
             await client.disconnect()
@@ -230,13 +234,20 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         return False, f'FloodWait: {e.seconds} seconds'
     except UserPrivacyRestrictedError:
         await client.disconnect()
-        return False, 'User privacy settings prevent messaging'
+        # Log privacy restriction for statistics
+        print(f"DEBUG: ✗ User {user.get('user_id')} has privacy settings that prevent messaging from unknown users")
+        return False, 'User privacy settings prevent messaging from unknown users. The user may need to add you to contacts first.'
     except PeerFloodError:
         await client.disconnect()
         return False, 'Peer flood - account limited'
     except Exception as e:
+        error_str = str(e)
+        # Check for InputUserEmpty or similar errors
+        if "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
         await client.disconnect()
-        return False, str(e)
+            return False, f'User not accessible: {user.get("user_id")}. Could not find user entity. User may not be accessible via API or may have privacy restrictions.'
+        await client.disconnect()
+        return False, f'Error sending to user {user.get("user_id")}: {error_str}'
 
 
 def run_campaign_task(campaign_id):
@@ -545,8 +556,8 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
         db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
@@ -778,11 +789,11 @@ def new_campaign():
             account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
             if account:
                 account_id = account.get('id')
-                # Generate new ID: acc_{phone}_{campaign_id}
+                    # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
                     
-                # Update account with new ID and campaign_id
+                    # Update account with new ID and campaign_id
                 update_account(account_id, {
                         'new_id': new_account_id,
                         'campaign_id': campaign_id
@@ -1265,7 +1276,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-                acc['rate_limits'] = stats
+        acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
