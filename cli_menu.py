@@ -36,11 +36,26 @@ def show_dashboard():
     print_header("DASHBOARD")
 
     accounts = db.get_all_accounts()
-    # Still use sheets_manager for users, dialogs, logs (not migrated yet)
+    # Try to get users, dialogs, logs from sheets_manager if available
+    # (only works with MockSheetsManager, not real SheetsManager)
     from sheets_loader import sheets_manager
-    users = sheets_manager.users
-    dialogs = sheets_manager.dialogs
-    logs = sheets_manager.logs[-10:]  # Last 10 logs
+    try:
+        users = getattr(sheets_manager, 'users', [])
+        dialogs = getattr(sheets_manager, 'dialogs', [])
+        logs = getattr(sheets_manager, 'logs', [])[-10:] if hasattr(sheets_manager, 'logs') else []
+    except AttributeError:
+        # Fallback if attributes don't exist
+        users = []
+        dialogs = []
+        logs = []
+    
+    # Try to get users from database if available
+    try:
+        campaign_users = db.get_all_campaign_users()
+        if campaign_users and not users:
+            users = campaign_users
+    except:
+        pass
 
     # Accounts summary
     print("\n📱 ACCOUNTS:")
