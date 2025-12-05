@@ -35,9 +35,17 @@ async def check_account_status(account_id: str) -> Dict:
                 "error": "Account not found"
             }
 
-        # Get settings for proxy (still from sheets_manager for now)
-        from sheets_loader import sheets_manager
-        settings = sheets_manager.get_settings()
+        # Get settings for proxy from config
+        settings = {
+            "proxy_enabled": config.PROXY_ENABLED,
+            "default_proxy_type": config.DEFAULT_PROXY_TYPE,
+            "default_proxy_host": config.DEFAULT_PROXY_HOST,
+            "default_proxy_port": config.DEFAULT_PROXY_PORT,
+            "default_proxy_user": config.DEFAULT_PROXY_USER,
+            "default_proxy_pass": config.DEFAULT_PROXY_PASS,
+            "api_id": config.API_ID,
+            "api_hash": config.API_HASH
+        }
 
         # Create client
         client = await get_client(account, settings)
@@ -366,14 +374,18 @@ async def delete_account(account_id: str) -> Dict:
                 "error": "Failed to delete account"
             }
 
-        # Log the deletion (still using sheets_manager for logs)
-        from sheets_loader import sheets_manager
-        sheets_manager.add_log({
-            "account_id": account_id,
-            "action": "account_deleted",
-            "result": "success",
-            "details": f"Account {account.get('phone')} deleted"
-        })
+        # Log the deletion to database (if there are active campaigns)
+        try:
+            campaigns = db.get_all_campaigns()
+            for campaign in campaigns:
+                db.add_campaign_log(
+                    campaign['id'],
+                    f"Account {account.get('phone')} deleted",
+                    level='info',
+                    details=f"Account ID: {account_id}"
+                )
+        except:
+            pass
 
         return {
             "success": True,
