@@ -187,14 +187,14 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
 
             # If GetUsersRequest didn't work, try get_entity (works if user in contacts or was contacted)
             if not target:
-            try:
+                try:
                     target = await client.get_entity(user_id_value)
                     print(f"DEBUG: ✓ Found user via get_entity: {user_id_value}")
-            except Exception as e:
+                except Exception as e:
                     print(f"DEBUG: get_entity failed: {e}")
 
             # Fallback: use user_id directly (Telethon will attempt to resolve)
-        if not target:
+            if not target:
                 print(f"DEBUG: Using direct user_id: {user_id_value} (Telethon will attempt resolution)")
                 target = user_id_value
 
@@ -218,8 +218,8 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             # Send text only with HTML formatting
             await client.send_message(target, message_text, parse_mode='html')
             
-        await client.disconnect()
-        return True, None
+            await client.disconnect()
+            return True, None
         except (ValueError, TypeError) as e:
             error_str = str(e)
             await client.disconnect()
