@@ -196,7 +196,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         except (ValueError, TypeError) as e:
             await client.disconnect()
             return False, f'Invalid user_id format: {user.get("user_id")} - {str(e)}'
-        except Exception as e:
+            except Exception as e:
             await client.disconnect()
             return False, f'Failed to process user_id {user.get("user_id")}: {str(e)}'
 
@@ -206,27 +206,27 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
 
         # Send message with or without media, using HTML parsing
         try:
-            if media_path and media_type:
-                media_file = Path(media_path)
-                if media_file.exists():
-                    print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
-                    # Send with media - use file path directly
-                    if media_type == 'photo':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'video':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'audio':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                else:
-                    print(f"DEBUG: Media file not found: {media_path}")
-                    # File doesn't exist, send text only
-                    await client.send_message(target, message_text, parse_mode='html')
+        if media_path and media_type:
+            media_file = Path(media_path)
+            if media_file.exists():
+                print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+                # Send with media - use file path directly
+                if media_type == 'photo':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'video':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'audio':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
             else:
-                # Send text only with HTML formatting
+                print(f"DEBUG: Media file not found: {media_path}")
+                # File doesn't exist, send text only
                 await client.send_message(target, message_text, parse_mode='html')
+        else:
+            # Send text only with HTML formatting
+            await client.send_message(target, message_text, parse_mode='html')
             
-            await client.disconnect()
-            return True, None
+        await client.disconnect()
+        return True, None
         except ValueError as ve:
             # Handle "Could not find the input entity" error
             error_str = str(ve)
@@ -558,9 +558,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -653,8 +653,8 @@ def dashboard():
     # Get accounts
     accounts = get_all_accounts()
 
-    # Get users for outreach
-    users = sheets_manager.users
+    # Get users for outreach from database
+    users = db.get_all_campaign_users()
 
     # Get recent campaigns
     campaigns = db.get_user_campaigns(user_id, limit=10)
@@ -732,7 +732,7 @@ def new_campaign():
             flash('Please provide either a message or media file', 'warning')
             # Get accounts and users for form
             accounts = get_all_accounts()
-            users = sheets_manager.users
+            users = db.get_all_campaign_users()
             return render_template('new_campaign.html', accounts=accounts, users=users)
 
         # Get selected accounts (form sends phone numbers, not IDs)
@@ -791,21 +791,21 @@ def new_campaign():
             account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
             if account:
                 account_id = account.get('id')
-                # Generate new ID: acc_{phone}_{campaign_id}
+                    # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
-                
-                # Update account with new ID and campaign_id
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    
+                    # Update account with new ID and campaign_id
                 update_account(account_id, {
-                    'new_id': new_account_id,
-                    'campaign_id': campaign_id
-                })
+                        'new_id': new_account_id,
+                        'campaign_id': campaign_id
+                    })
         flash('Campaign created! Starting...', 'success')
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
 
     # Get accounts and users for form
     accounts = get_all_accounts()
-    users = sheets_manager.users
+    users = db.get_all_campaign_users()
     proxies = proxy_manager.get_all_proxies()
 
     # Debug: log all accounts being sent to template
@@ -1278,7 +1278,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-                acc['rate_limits'] = stats
+        acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
@@ -1923,15 +1923,37 @@ def add_user():
         flash('Please provide at least username, user ID, or phone number', 'danger')
         return redirect(url_for('users_list'))
 
-    user_data = {
-        'username': username if username else None,
-        'user_id': user_id_int,
-        'phone': phone if phone else None,
-        'priority': priority_int,
-        'status': 'pending'
-    }
-
-    sheets_manager.add_user(user_data)
+    # For users added without campaign, we need to create a default campaign or use existing
+    # For now, we'll add to a default campaign (campaign_id = 0 means "general users")
+    # Or we can create a special "General Users" campaign
+    user_id = session['user_id']
+    
+    # Get or create a default campaign for general users
+    default_campaign = None
+    campaigns = db.get_user_campaigns(user_id)
+    for campaign in campaigns:
+        if campaign.get('name') == 'General Users':
+            default_campaign = campaign
+            break
+    
+    if not default_campaign:
+        # Create default campaign
+        campaign_id = db.create_campaign(
+            user_id=user_id,
+            name='General Users',
+            total_users=0
+        )
+    else:
+        campaign_id = default_campaign['id']
+    
+    # Add user to campaign
+    db.add_campaign_user(
+        campaign_id=campaign_id,
+        username=username if username else None,
+        user_id=str(user_id_int) if user_id_int else None,
+        phone=phone if phone else None,
+        priority=priority_int
+    )
 
     flash('User added successfully', 'success')
     return redirect(url_for('users_list'))
@@ -1948,7 +1970,21 @@ def bulk_delete_users():
         if not user_ids:
             return jsonify({'success': False, 'error': 'No users selected'})
         
-        count = sheets_manager.delete_users(user_ids)
+        # Delete users from all campaigns
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        count = 0
+        try:
+            for user_id in user_ids:
+                cursor.execute('DELETE FROM campaign_users WHERE id = ?', (user_id,))
+                if cursor.rowcount > 0:
+                    count += 1
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            return jsonify({'success': False, 'error': str(e)})
+        finally:
+            conn.close()
         
         return jsonify({'success': True, 'count': count})
     except Exception as e:
@@ -2061,8 +2097,32 @@ def import_csv_users():
                 skipped += 1
                 continue
 
-            user_data['status'] = 'pending'
-            sheets_manager.add_user(user_data)
+            # Get or create default campaign for general users
+            user_id = session['user_id']
+            default_campaign = None
+            campaigns = db.get_user_campaigns(user_id)
+            for campaign in campaigns:
+                if campaign.get('name') == 'General Users':
+                    default_campaign = campaign
+                    break
+            
+            if not default_campaign:
+                campaign_id = db.create_campaign(
+                    user_id=user_id,
+                    name='General Users',
+                    total_users=0
+                )
+            else:
+                campaign_id = default_campaign['id']
+            
+            # Add user to campaign
+            db.add_campaign_user(
+                campaign_id=campaign_id,
+                username=user_data.get('username'),
+                user_id=str(user_data.get('user_id')) if user_data.get('user_id') else None,
+                phone=user_data.get('phone'),
+                priority=user_data.get('priority', 1)
+            )
             count += 1
 
         print(f"✓ Import complete: {count} users imported, {skipped} skipped")
@@ -2218,7 +2278,7 @@ def check_proxy_ips():
 def api_stats():
     """Get system stats (JSON)"""
     accounts = get_all_accounts()
-    users = sheets_manager.users
+    users = db.get_all_campaign_users()
     user_id = session['user_id']
     campaigns = db.get_user_campaigns(user_id)
 
