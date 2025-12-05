@@ -199,27 +199,27 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 target = user_id_value
 
             # Send message with or without media, using HTML parsing
-                if media_path and media_type:
-                    media_file = Path(media_path)
-                    if media_file.exists():
-                        print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
-                            # Send with media
-                        if media_type == 'photo':
-                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                        elif media_type == 'video':
-                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                        elif media_type == 'audio':
-                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    else:
-                        print(f"DEBUG: Media file not found: {media_path}")
-                        # File doesn't exist, send text only
-                        await client.send_message(target, message_text, parse_mode='html')
+            if media_path and media_type:
+                media_file = Path(media_path)
+                if media_file.exists():
+                    print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+                    # Send with media
+                    if media_type == 'photo':
+                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                    elif media_type == 'video':
+                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                    elif media_type == 'audio':
+                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
                 else:
-                    # Send text only with HTML formatting
+                    print(f"DEBUG: Media file not found: {media_path}")
+                    # File doesn't exist, send text only
                     await client.send_message(target, message_text, parse_mode='html')
-                
-                await client.disconnect()
-                return True, None
+            else:
+                # Send text only with HTML formatting
+                await client.send_message(target, message_text, parse_mode='html')
+            
+            await client.disconnect()
+            return True, None
         except (ValueError, TypeError) as e:
             error_str = str(e)
             await client.disconnect()
