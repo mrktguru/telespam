@@ -168,92 +168,36 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             user_id_value = int(user_id_str)
             print(f"DEBUG: Sending to user ID: {user_id_value} (original: {user.get('user_id')})")
             
-            # Try multiple methods to get user entity/access_hash
-            target = None
-            
-            # Method 1: Try get_entity by ID (works if user is in contacts or was contacted before)
-            try:
-                target = await client.get_entity(user_id_value)
-                print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id_value}")
-            except (ValueError, TypeError) as ve:
-                print(f"DEBUG: get_entity by ID failed: {ve}")
-                
-                # Method 2: Try to resolve by username if available (more reliable for unknown users)
-                username = user.get('username')
-                if username:
-                    try:
-                        username_clean = username.lstrip('@')
-                        print(f"DEBUG: Trying to find user by username: @{username_clean}")
-                        target = await client.get_entity(username_clean)
-                        print(f"DEBUG: ✓ Found user by username: @{username_clean}")
-                    except Exception as e:
-                        print(f"DEBUG: Failed to find by username @{username_clean}: {e}")
-                
-                # Method 3: Try GetUsersRequest to get access_hash (works for some users)
-                if not target:
-                    try:
-                        from telethon.tl.functions.users import GetUsersRequest
-                        print(f"DEBUG: Trying GetUsersRequest for ID: {user_id_value}")
-                        users_result = await client(GetUsersRequest([user_id_value]))
-                        if users_result and len(users_result) > 0:
-                            user_obj = users_result[0]
-                            from telethon.tl.types import InputPeerUser
-                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                            print(f"DEBUG: ✓ Found user by GetUsersRequest: {user_id_value} (access_hash obtained)")
-                    except Exception as e2:
-                        print(f"DEBUG: GetUsersRequest failed: {e2}")
-                
-                # Method 4: Try ResolveUsername if we have username (for unknown users)
-                if not target and username:
-                    try:
-                        from telethon.tl.functions.contacts import ResolveUsernameRequest
-                        username_clean = username.lstrip('@')
-                        print(f"DEBUG: Trying ResolveUsername for @{username_clean}")
-                        resolved = await client(ResolveUsernameRequest(username_clean))
-                        if resolved and hasattr(resolved, 'users') and len(resolved.users) > 0:
-                            user_obj = resolved.users[0]
-                            from telethon.tl.types import InputPeerUser
-                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                            print(f"DEBUG: ✓ Found user by ResolveUsername: @{username_clean} (access_hash obtained)")
-                    except Exception as e3:
-                        print(f"DEBUG: ResolveUsername failed: {e3}")
-            
-            # If we still don't have target, try direct user_id (Telethon will attempt to resolve)
-            # This might work if user was previously contacted or is in some way accessible
-            if not target:
-                print(f"DEBUG: No entity found, trying direct user_id: {user_id_value}")
-                target = user_id_value
+            # PRIORITY: USER_ID - pass directly to send_message/send_file
+            # This is the same approach as sender.py (CLI) - Telethon handles entity resolution
+            # Works for users in contacts, previously contacted, or accessible via API
+            print(f"DEBUG: Sending directly to user_id: {user_id_value} (same as CLI)")
             
             # Send message with or without media, using HTML parsing
+            # Pass user_id directly - Telethon will attempt to resolve automatically
             if media_path and media_type:
                 media_file = Path(media_path)
                 if media_file.exists():
                     print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
-                    # Send with media - use file path directly
+                    # Send with media - pass user_id directly
                     if media_type == 'photo':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        await client.send_file(user_id_value, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
                     elif media_type == 'video':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        await client.send_file(user_id_value, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
                     elif media_type == 'audio':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        await client.send_file(user_id_value, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
                 else:
                     print(f"DEBUG: Media file not found: {media_path}")
                     # File doesn't exist, send text only
-                    await client.send_message(target, message_text, parse_mode='html')
+                    await client.send_message(user_id_value, message_text, parse_mode='html')
             else:
-                # Send text only with HTML formatting
-                await client.send_message(target, message_text, parse_mode='html')
+                # Send text only with HTML formatting - pass user_id directly
+                await client.send_message(user_id_value, message_text, parse_mode='html')
             
             await client.disconnect()
             return True, None
         except (ValueError, TypeError) as e:
             error_str = str(e)
-            # Check if it's the "Could not find the input entity" error
-            if "Could not find the input entity" in error_str or "PeerUser" in error_str:
-                await client.disconnect()
-                # Provide helpful message about what might help
-                username_hint = f" (username: @{user.get('username')})" if user.get('username') else ""
-                return False, f'User not accessible: {user.get("user_id")}{username_hint}. Try adding username to the user data, or the user may have privacy settings that prevent messaging from unknown users.'
             await client.disconnect()
             return False, f'Invalid user_id format: {user.get("user_id")} - {error_str}'
 
