@@ -792,7 +792,7 @@ def new_campaign():
             if account:
                 account_id = account.get('id')
                     # Generate new ID: acc_{phone}_{campaign_id}
-                phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
+                    phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
                     new_account_id = f"acc_{phone_clean}_{campaign_id}"
                     
                     # Update account with new ID and campaign_id
