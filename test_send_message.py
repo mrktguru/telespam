@@ -9,6 +9,16 @@ import os
 from pathlib import Path
 
 
+def safe_input(prompt):
+    """Input with UTF-8 encoding fix for terminal issues"""
+    try:
+        return input(prompt)
+    except UnicodeDecodeError:
+        # Fix encoding for terminals that don't use UTF-8
+        sys.stdin.reconfigure(encoding='utf-8', errors='replace')
+        return input(prompt)
+
+
 async def send_test_message():
     """Send test message to specified user"""
 
@@ -66,7 +76,7 @@ async def send_test_message():
         selected_session = session_files[0]
         print(f"Using session: {selected_session.stem}")
     else:
-        choice = input(f"Select session (1-{len(session_files)}): ").strip()
+        choice = safe_input(f"Select session (1-{len(session_files)}): ").strip()
         try:
             selected_session = session_files[int(choice) - 1]
         except:
@@ -80,14 +90,14 @@ async def send_test_message():
     print("Default: @champfreak (ID: 7115610560)")
     print()
 
-    use_default = input("Use default target? (yes/no): ").strip().lower()
+    use_default = safe_input("Use default target? (yes/no): ").strip().lower()
 
     if use_default == 'yes':
         target_username = "champfreak"
         target_id = 7115610560
         print(f"Using: @{target_username} (ID: {target_id})")
     else:
-        target_input = input("Enter username (without @) or user ID: ").strip()
+        target_input = safe_input("Enter username (without @) or user ID: ").strip()
 
         if target_input.isdigit():
             target_id = int(target_input)
@@ -105,7 +115,7 @@ async def send_test_message():
     print("3. Video note (circle)")
     print()
 
-    msg_type = input("Select type (1-3, default 1): ").strip() or "1"
+    msg_type = safe_input("Select type (1-3, default 1): ").strip() or "1"
 
     # Create client
     client = TelegramClient(
@@ -155,13 +165,13 @@ async def send_test_message():
             print(f"Default message:\n{default_text}")
             print()
 
-            custom = input("Use custom message? (yes/no): ").strip().lower()
+            custom = safe_input("Use custom message? (yes/no): ").strip().lower()
 
             if custom == 'yes':
                 print("Enter your message (press Enter twice to finish):")
                 lines = []
                 while True:
-                    line = input()
+                    line = safe_input()
                     if not line and lines:
                         break
                     lines.append(line)
@@ -183,14 +193,14 @@ async def send_test_message():
 
         elif msg_type == "2":
             # Photo
-            photo_path = input("Enter path to photo: ").strip()
+            photo_path = safe_input("Enter path to photo: ").strip()
 
             if not Path(photo_path).exists():
                 print(f"❌ File not found: {photo_path}")
                 await client.disconnect()
                 sys.exit(1)
 
-            caption = input("Enter caption (optional): ").strip()
+            caption = safe_input("Enter caption (optional): ").strip()
 
             print("Sending photo...")
             sent = await client.send_file(
@@ -207,7 +217,7 @@ async def send_test_message():
 
         elif msg_type == "3":
             # Video note
-            video_path = input("Enter path to video: ").strip()
+            video_path = safe_input("Enter path to video: ").strip()
 
             if not Path(video_path).exists():
                 print(f"❌ File not found: {video_path}")
