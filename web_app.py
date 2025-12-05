@@ -151,8 +151,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             return False, 'Account not authorized - session expired or invalid'
 
         # Find user by ID only (from XLS table)
-        # Use the same approach as CLI: pass user_id directly to send_message
-        # Telethon will handle entity resolution automatically
+        # Try multiple approaches to find and send to user
         
         if not user.get('user_id'):
             await client.disconnect()
@@ -168,32 +167,69 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             user_id_value = int(user_id_str)
             print(f"DEBUG: Sending to user ID: {user_id_value} (original: {user.get('user_id')})")
             
+            # Try to get entity first - this works if user is in contacts or was contacted before
+            target = None
+            try:
+                target = await client.get_entity(user_id_value)
+                print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id_value}")
+            except (ValueError, TypeError) as ve:
+                # If get_entity fails, try to resolve by username if available
+                username = user.get('username')
+                if username:
+                    try:
+                        print(f"DEBUG: Trying to find user by username: @{username}")
+                        target = await client.get_entity(username)
+                        print(f"DEBUG: ✓ Found user by username: @{username}")
+                    except Exception as e:
+                        print(f"DEBUG: Failed to find by username @{username}: {e}")
+                
+                # If still not found, try GetUsersRequest to get access_hash
+                if not target:
+                    try:
+                        from telethon.tl.functions.users import GetUsersRequest
+                        print(f"DEBUG: Trying GetUsersRequest for ID: {user_id_value}")
+                        users_result = await client(GetUsersRequest([user_id_value]))
+                        if users_result and len(users_result) > 0:
+                            user_obj = users_result[0]
+                            from telethon.tl.types import InputPeerUser
+                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                            print(f"DEBUG: ✓ Found user by GetUsersRequest: {user_id_value}")
+                    except Exception as e2:
+                        print(f"DEBUG: GetUsersRequest failed: {e2}")
+            
+            # If we have a target entity, use it; otherwise try direct user_id (Telethon will attempt to resolve)
+            send_target = target if target else user_id_value
+            
             # Send message with or without media, using HTML parsing
-            # Pass user_id directly to send_message/send_file - same as CLI does
             if media_path and media_type:
                 media_file = Path(media_path)
                 if media_file.exists():
                     print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
-                    # Send with media - use file path directly, pass user_id
+                    # Send with media - use file path directly
                     if media_type == 'photo':
-                        await client.send_file(user_id_value, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        await client.send_file(send_target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
                     elif media_type == 'video':
-                        await client.send_file(user_id_value, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        await client.send_file(send_target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
                     elif media_type == 'audio':
-                        await client.send_file(user_id_value, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        await client.send_file(send_target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
                 else:
                     print(f"DEBUG: Media file not found: {media_path}")
                     # File doesn't exist, send text only
-                    await client.send_message(user_id_value, message_text, parse_mode='html')
+                    await client.send_message(send_target, message_text, parse_mode='html')
             else:
-                # Send text only with HTML formatting - pass user_id directly
-                await client.send_message(user_id_value, message_text, parse_mode='html')
+                # Send text only with HTML formatting
+                await client.send_message(send_target, message_text, parse_mode='html')
             
             await client.disconnect()
             return True, None
         except (ValueError, TypeError) as e:
+            error_str = str(e)
+            # Check if it's the "Could not find the input entity" error
+            if "Could not find the input entity" in error_str or "PeerUser" in error_str:
+                await client.disconnect()
+                return False, f'User not accessible: {user.get("user_id")}. The user may have privacy settings that prevent messaging, or the account may need to add them to contacts first.'
             await client.disconnect()
-            return False, f'Invalid user_id format: {user.get("user_id")} - {str(e)}'
+            return False, f'Invalid user_id format: {user.get("user_id")} - {error_str}'
 
     except FloodWaitError as e:
         await client.disconnect()
