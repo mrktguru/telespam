@@ -546,7 +546,7 @@ def run_campaign_task(campaign_id):
             db.update_campaign(campaign_id, status='stopped')
         else:
         # Mark as completed
-        db.update_campaign(campaign_id, status='completed')
+            db.update_campaign(campaign_id, status='completed')
         db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
@@ -780,7 +780,7 @@ def new_campaign():
                 account_id = account.get('id')
                     # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                new_account_id = f"acc_{phone_clean}_{campaign_id}"
                     
                     # Update account with new ID and campaign_id
                 update_account(account_id, {
@@ -1266,10 +1266,10 @@ def accounts_list():
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
         acc['rate_limits'] = stats
-            else:
-                acc['rate_limits'] = None
+                    else:
+                    acc['rate_limits'] = None
         except Exception as e:
-            print(f"Warning: Could not get rate limits for account {acc.get('id')}: {e}")
+                    print(f"Warning: Could not get rate limits for account {acc.get('id')}: {e}")
             acc['rate_limits'] = None
 
     print(f"DEBUG: Returning {len(filtered_accounts)} accounts to template")
