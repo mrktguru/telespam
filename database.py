@@ -410,6 +410,18 @@ class Database:
 
         return None
 
+    def get_all_campaigns(self) -> List[Dict]:
+        """Get all campaigns"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM campaigns ORDER BY created_at DESC')
+        rows = cursor.fetchall()
+
+        conn.close()
+
+        return [dict(row) for row in rows]
+
     def get_user_campaigns(self, user_id: int, limit: int = 50) -> List[Dict]:
         """Get user's campaigns"""
         conn = self.get_connection()
