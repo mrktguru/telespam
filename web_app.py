@@ -196,7 +196,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         except (ValueError, TypeError) as e:
             await client.disconnect()
             return False, f'Invalid user_id format: {user.get("user_id")} - {str(e)}'
-            except Exception as e:
+        except Exception as e:
             await client.disconnect()
             return False, f'Failed to process user_id {user.get("user_id")}: {str(e)}'
 
