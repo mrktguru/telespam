@@ -221,12 +221,12 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 print(f"DEBUG: Media file not found: {media_path}")
                 # File doesn't exist, send text only
                 await client.send_message(target, message_text, parse_mode='html')
-        else:
+            else:
             # Send text only with HTML formatting
             await client.send_message(target, message_text, parse_mode='html')
             
-        await client.disconnect()
-        return True, None
+            await client.disconnect()
+            return True, None
         except ValueError as ve:
             # Handle "Could not find the input entity" error
             error_str = str(ve)
