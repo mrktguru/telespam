@@ -55,6 +55,10 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
 
     Returns: (success: bool, error_msg: str)
     """
+    # Diagnostic: Check API credentials
+    print(f"DEBUG: API_ID = {config.API_ID}, API_HASH = {'SET' if config.API_HASH else 'NOT SET'}")
+    print(f"DEBUG: Sending from account: {account.get('phone')}, to user: {user}")
+
     phone = account.get('phone')
     session_file = Path(__file__).parent / 'sessions' / f'{phone.replace("+", "")}.session'
 
@@ -2020,6 +2024,27 @@ def import_csv_users():
             print("ERROR: DataFrame is empty")
             return jsonify({'success': False, 'error': 'File is empty'})
 
+        # Normalize column names to handle different formats
+        # "User name" -> "username", "User ID" -> "user_id", etc.
+        column_mapping = {}
+        for col in df.columns:
+            col_lower = str(col).lower().strip()
+            # Map common column name variations
+            if col_lower in ['username', 'user name', 'user_name']:
+                column_mapping[col] = 'username'
+            elif col_lower in ['user_id', 'user id', 'userid', 'id']:
+                column_mapping[col] = 'user_id'
+            elif col_lower in ['phone', 'phone number', 'phone_number', 'phonenumber']:
+                column_mapping[col] = 'phone'
+            elif col_lower in ['priority']:
+                column_mapping[col] = 'priority'
+
+        # Rename columns
+        if column_mapping:
+            df = df.rename(columns=column_mapping)
+            print(f"Column mapping applied: {column_mapping}")
+            print(f"New columns: {list(df.columns)}")
+
         # Expected columns: username, user_id, phone, priority (all optional)
         print(f"Processing {len(df)} rows...")
         count = 0
@@ -2029,7 +2054,10 @@ def import_csv_users():
             user_data = {}
 
             if 'username' in df.columns and pd.notna(row['username']):
-                user_data['username'] = str(row['username']).strip().lstrip('@')
+                username_val = str(row['username']).strip().lstrip('@')
+                # Skip if username is just "-" or empty
+                if username_val and username_val != '-':
+                    user_data['username'] = username_val
 
             if 'user_id' in df.columns and pd.notna(row['user_id']):
                 try:
@@ -2043,7 +2071,9 @@ def import_csv_users():
                 # Handle phone numbers that might be parsed as floats
                 if '.' in phone_str:
                     phone_str = phone_str.split('.')[0]
-                user_data['phone'] = phone_str
+                # Skip if phone is just "-" or empty
+                if phone_str and phone_str != '-':
+                    user_data['phone'] = phone_str
 
             if 'priority' in df.columns and pd.notna(row['priority']):
                 try:
