@@ -1279,8 +1279,8 @@ def accounts_list():
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
                 acc['rate_limits'] = stats
-                else:
-                    acc['rate_limits'] = None
+            else:
+                acc['rate_limits'] = None
         except Exception as e:
             print(f"Warning: Could not get rate limits for account {acc.get('id')}: {e}")
             acc['rate_limits'] = None
