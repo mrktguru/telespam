@@ -127,7 +127,7 @@ class Database:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS accounts (
                 id TEXT PRIMARY KEY,
-                phone TEXT NOT NULL,
+                phone TEXT UNIQUE NOT NULL,
                 username TEXT,
                 first_name TEXT,
                 last_name TEXT,
