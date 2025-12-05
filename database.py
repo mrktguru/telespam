@@ -123,6 +123,39 @@ class Database:
             )
         ''')
 
+        # Accounts table - for Telegram sender accounts
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS accounts (
+                id TEXT PRIMARY KEY,
+                phone TEXT NOT NULL,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                bio TEXT,
+                session_file TEXT,
+                status TEXT DEFAULT 'checking',
+                daily_sent INTEGER DEFAULT 0,
+                total_sent INTEGER DEFAULT 0,
+                cooldown_until TEXT,
+                last_used_at TEXT,
+                added_at TEXT,
+                flood_count INTEGER DEFAULT 0,
+                use_proxy BOOLEAN DEFAULT 0,
+                proxy TEXT,
+                proxy_type TEXT,
+                proxy_host TEXT,
+                proxy_port TEXT,
+                proxy_user TEXT,
+                proxy_pass TEXT,
+                campaign_id INTEGER,
+                notes TEXT,
+                photo_count INTEGER DEFAULT 0,
+                rate_limits TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # Registration accounts table - for account registration process
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS registration_accounts (
@@ -1251,6 +1284,154 @@ class Database:
             conn.rollback()
         finally:
             conn.close()
+
+    # ============================================================================
+    # ACCOUNTS OPERATIONS
+    # ============================================================================
+
+    def add_account(self, account: Dict) -> bool:
+        """Add new account to database"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT OR REPLACE INTO accounts (
+                    id, phone, username, first_name, last_name, bio, session_file,
+                    status, daily_sent, total_sent, cooldown_until, last_used_at,
+                    added_at, flood_count, use_proxy, proxy, proxy_type, proxy_host,
+                    proxy_port, proxy_user, proxy_pass, campaign_id, notes, photo_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                account.get('id'),
+                account.get('phone'),
+                account.get('username'),
+                account.get('first_name'),
+                account.get('last_name'),
+                account.get('bio'),
+                account.get('session_file'),
+                account.get('status', 'checking'),
+                account.get('daily_sent', 0),
+                account.get('total_sent', 0),
+                account.get('cooldown_until'),
+                account.get('last_used_at'),
+                account.get('added_at'),
+                account.get('flood_count', 0),
+                1 if account.get('use_proxy') else 0,
+                account.get('proxy'),
+                account.get('proxy_type'),
+                account.get('proxy_host'),
+                account.get('proxy_port'),
+                account.get('proxy_user'),
+                account.get('proxy_pass'),
+                account.get('campaign_id'),
+                account.get('notes'),
+                account.get('photo_count', 0)
+            ))
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            print(f"Error adding account: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            conn.close()
+
+    def get_account(self, account_id: str) -> Optional[Dict]:
+        """Get account by ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT * FROM accounts WHERE id = ?', (account_id,))
+            row = cursor.fetchone()
+            if row:
+                return self._row_to_dict(row, cursor.description)
+            return None
+        except Exception as e:
+            print(f"Error getting account: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_all_accounts(self) -> List[Dict]:
+        """Get all accounts"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT * FROM accounts ORDER BY created_at DESC')
+            rows = cursor.fetchall()
+            accounts = []
+            for row in rows:
+                account = self._row_to_dict(row, cursor.description)
+                # Convert boolean fields
+                if account.get('use_proxy') is not None:
+                    account['use_proxy'] = bool(account.get('use_proxy'))
+                accounts.append(account)
+            return accounts
+        except Exception as e:
+            print(f"Error getting all accounts: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+        finally:
+            conn.close()
+
+    def update_account(self, account_id: str, updates: Dict) -> bool:
+        """Update account fields"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            # Handle ID change if requested
+            if 'new_id' in updates:
+                new_id = updates.pop('new_id')
+                cursor.execute('UPDATE accounts SET id = ? WHERE id = ?', (new_id, account_id))
+                account_id = new_id
+            
+            # Build update query dynamically
+            if updates:
+                set_clause = ', '.join([f"{key} = ?" for key in updates.keys()])
+                set_clause += ', updated_at = CURRENT_TIMESTAMP'
+                values = list(updates.values()) + [account_id]
+                
+                # Convert boolean to int for use_proxy
+                if 'use_proxy' in updates:
+                    idx = list(updates.keys()).index('use_proxy')
+                    values[idx] = 1 if values[idx] else 0
+                
+                cursor.execute(f'UPDATE accounts SET {set_clause} WHERE id = ?', values)
+                conn.commit()
+                return True
+            return False
+        except Exception as e:
+            conn.rollback()
+            print(f"Error updating account: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            conn.close()
+
+    def delete_account(self, account_id: str) -> bool:
+        """Delete account by ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('DELETE FROM accounts WHERE id = ?', (account_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            conn.rollback()
+            print(f"Error deleting account: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def _row_to_dict(self, row, description) -> Dict:
+        """Convert database row to dictionary"""
+        if row is None:
+            return {}
+        return {desc[0]: row[i] for i, desc in enumerate(description)}
 
 
 # Singleton instance
