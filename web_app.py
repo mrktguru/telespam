@@ -286,12 +286,37 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                     if not isinstance(user_id_value, int):
                         print(f"DEBUG: WARNING: user_id_value is not int in GetUsersRequest! Converting...")
                         user_id_value = int(user_id_value)
-                    # Try with plain int first (most common case)
+                    
+                    # Try multiple approaches for GetUsersRequest
+                    users_result = None
                     try:
+                        # Approach 1: Try with plain int first (most common case)
+                        print(f"DEBUG: GetUsersRequest Approach 1: Plain int")
                         users_result = await client(GetUsersRequest([user_id_value]))
-                        
-                        # DETAILED LOGGING: Check what GetUsersRequest returned
-                        if users_result and len(users_result) > 0:
+                        print(f"DEBUG: ✓ GetUsersRequest Approach 1 succeeded")
+                    except Exception as e1:
+                        print(f"DEBUG: GetUsersRequest Approach 1 failed: {e1}")
+                        try:
+                            # Approach 2: Try with InputUser(user_id, access_hash=0)
+                            from telethon.tl.types import InputUser
+                            print(f"DEBUG: GetUsersRequest Approach 2: InputUser with access_hash=0")
+                            input_user = InputUser(user_id=user_id_value, access_hash=0)
+                            users_result = await client(GetUsersRequest([input_user]))
+                            print(f"DEBUG: ✓ GetUsersRequest Approach 2 succeeded")
+                        except Exception as e2:
+                            print(f"DEBUG: GetUsersRequest Approach 2 failed: {e2}")
+                            try:
+                                # Approach 3: Try with InputUserEmpty (sometimes works)
+                                from telethon.tl.types import InputUserEmpty
+                                print(f"DEBUG: GetUsersRequest Approach 3: InputUserEmpty")
+                                # Actually, InputUserEmpty won't work, skip this
+                                users_result = None
+                            except Exception as e3:
+                                print(f"DEBUG: GetUsersRequest Approach 3 failed: {e3}")
+                                users_result = None
+                    
+                    # DETAILED LOGGING: Check what GetUsersRequest returned (if any)
+                    if users_result and len(users_result) > 0:
                             user_obj = users_result[0]
                             print(f"DEBUG: ===== GetUsersRequest RESULT DETAILS =====")
                             print(f"DEBUG: GetUsersRequest returned {len(users_result)} user(s)")
@@ -320,11 +345,9 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             if hasattr(user_obj, 'deleted') and user_obj.deleted:
                                 print(f"DEBUG: ⚠ WARNING: user.deleted is True - user account is deleted!")
                             
-                    except Exception as e1:
-                        print(f"DEBUG: GetUsersRequest with int failed: {e1}, trying alternative...")
-                        import traceback
-                        print(f"DEBUG: GetUsersRequest traceback: {traceback.format_exc()}")
-                        # Try alternative: get_input_entity first, then use it
+                    # If GetUsersRequest failed, try get_input_entity as alternative
+                    if not users_result:
+                        print(f"DEBUG: GetUsersRequest failed, trying get_input_entity as alternative...")
                         try:
                             # CRITICAL: Ensure user_id_value is int for get_input_entity
                             if not isinstance(user_id_value, int):
@@ -339,7 +362,8 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                 print(f"DEBUG: ✓ Got access_hash via get_input_entity for ID: {user_id_value} (cached)")
                         except Exception as e2:
                             print(f"DEBUG: get_input_entity also failed: {e2}")
-                            users_result = None
+                            import traceback
+                            print(f"DEBUG: get_input_entity traceback: {traceback.format_exc()}")
                     
                     if not target and users_result and len(users_result) > 0:
                         user_obj = users_result[0]
@@ -382,7 +406,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             if hasattr(user_obj, 'id') and user_obj.id:
                                 print(f"DEBUG: User exists (id={user_obj.id}) but no access_hash, will try direct send")
                                 # Don't set target here, let it fall through to other strategies
-                    elif not target:
+                    else:
                         print(f"DEBUG: GetUsersRequest returned empty result or failed")
                 except Exception as e:
                     print(f"DEBUG: GetUsersRequest failed: {e} (type: {type(e)})")
@@ -2095,7 +2119,8 @@ def add_account_tdata():
                 
                 session_file = sessions_dir / f"{phone.replace('+', '')}.session"
                 
-                client = TelegramClient(str(session_file.with_suffix('')), api_id, api_hash)
+                # CRITICAL: Always use API credentials from config for creating client
+                client = TelegramClient(str(session_file.with_suffix('')), config.API_ID, config.API_HASH)
                 
                 try:
                     await client.connect()
@@ -2114,10 +2139,11 @@ def add_account_tdata():
                         if existing_phone == phone_normalized_check:
                             return {'success': False, 'error': f'Account with phone {phone_from_me} already exists (ID: {existing.get("id")})'}
                     
-                    # CRITICAL: Store the API credentials that were used to create the session
-                    # The session file is bound to these specific API credentials
-                    # Using different credentials will cause "Could not find the input entity" errors
-                    print(f"DEBUG: Storing API credentials for JSON account: api_id={api_id}, api_hash={api_hash[:10]}...")
+                    # CRITICAL: Always use API credentials from config, not from JSON file
+                    # All accounts must use the same API credentials for consistency
+                    # The session file will be recreated with correct credentials if needed
+                    print(f"DEBUG: Using API credentials from config for JSON account: api_id={config.API_ID}, api_hash={config.API_HASH[:10]}...")
+                    print(f"DEBUG: JSON file had: api_id={api_id}, api_hash={api_hash[:10]}... (ignored, using config)")
                     
                     account_data = {
                         'phone': me.phone,
@@ -2127,8 +2153,8 @@ def add_account_tdata():
                         'session_file': str(session_file),
                         'status': 'active',
                         'notes': notes or 'Web added from JSON',
-                        'api_id': api_id,  # CRITICAL: Store API credentials used to create session
-                        'api_hash': api_hash  # CRITICAL: Store API credentials used to create session
+                        'api_id': config.API_ID,  # CRITICAL: Always use config values
+                        'api_hash': config.API_HASH  # CRITICAL: Always use config values
                     }
                     
                     add_result = await add_account(account_data)
@@ -2152,11 +2178,13 @@ def add_account_tdata():
                         if existing_phone == phone_normalized_check:
                             return {'success': False, 'error': f'Account with phone {phone_from_result} already exists (ID: {existing.get("id")})'}
                     
-                    # Ensure API credentials are set (should already be in account_data from converter, but set as fallback)
-                    if not account_data.get('api_id'):
-                        account_data['api_id'] = config.API_ID
-                    if not account_data.get('api_hash'):
-                        account_data['api_hash'] = config.API_HASH
+                    # CRITICAL: Always use API credentials from config, not from converter
+                    # All accounts must use the same API credentials for consistency
+                    print(f"DEBUG: Using API credentials from config for TDATA/SESSION account: api_id={config.API_ID}, api_hash={config.API_HASH[:10]}...")
+                    if account_data.get('api_id') != config.API_ID or account_data.get('api_hash') != config.API_HASH:
+                        print(f"DEBUG: Converter provided different credentials (api_id={account_data.get('api_id')}, api_hash={account_data.get('api_hash', '')[:10]}...), overriding with config values")
+                    account_data['api_id'] = config.API_ID
+                    account_data['api_hash'] = config.API_HASH
                     
                     # Ensure all required fields have defaults
                     account_data.setdefault('last_name', '')
@@ -2223,7 +2251,8 @@ def add_account_manual():
             sessions_dir.mkdir(exist_ok=True)
             session_file = sessions_dir / f"{session_name}.session"
             
-            client = TelegramClient(str(session_file.with_suffix('')), api_id, api_hash)
+            # CRITICAL: Always use API credentials from config for creating client
+            client = TelegramClient(str(session_file.with_suffix('')), config.API_ID, config.API_HASH)
             
             try:
                 await client.connect()
@@ -2244,6 +2273,11 @@ def add_account_manual():
                     if existing_phone == phone_normalized_check:
                         return {'success': False, 'error': f'Account with phone {phone} already exists (ID: {existing.get("id")})'}
                 
+                # CRITICAL: Always use API credentials from config, not from form
+                # All accounts must use the same API credentials for consistency
+                print(f"DEBUG: Using API credentials from config for manual account: api_id={config.API_ID}, api_hash={config.API_HASH[:10]}...")
+                print(f"DEBUG: Form provided: api_id={api_id}, api_hash={api_hash[:10]}... (ignored, using config)")
+                
                 account_data = {
                     'phone': me.phone,
                     'username': me.username or '',
@@ -2252,8 +2286,8 @@ def add_account_manual():
                     'session_file': str(session_file),
                     'status': 'active',
                     'notes': notes or 'Web added manually',
-                    'api_id': api_id,  # Store API credentials
-                    'api_hash': api_hash  # Store API credentials
+                    'api_id': config.API_ID,  # CRITICAL: Always use config values
+                    'api_hash': config.API_HASH  # CRITICAL: Always use config values
                 }
                 
                 add_result = await add_account(account_data)
