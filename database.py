@@ -22,11 +22,27 @@ class Database:
     def get_connection(self):
         """Get database connection with proper error handling"""
         try:
+            # Ensure database directory exists and is writable
+            db_dir = self.db_path.parent
+            if not db_dir.exists():
+                db_dir.mkdir(parents=True, exist_ok=True)
+            
             # Ensure database file exists and is writable
             if self.db_path.exists():
                 # Check if file is writable
                 if not os.access(self.db_path, os.W_OK):
-                    raise PermissionError(f"Database file {self.db_path} is not writable")
+                    # Try to fix permissions
+                    try:
+                        os.chmod(self.db_path, 0o664)
+                    except Exception as perm_error:
+                        raise PermissionError(f"Database file {self.db_path} is not writable and cannot be fixed. Error: {perm_error}")
+            else:
+                # Create empty database file with proper permissions
+                self.db_path.touch(mode=0o664)
+            
+            # Check directory permissions
+            if not os.access(db_dir, os.W_OK):
+                raise PermissionError(f"Database directory {db_dir} is not writable")
             
             conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
             conn.row_factory = sqlite3.Row
@@ -41,7 +57,16 @@ class Database:
             if "database is locked" in str(e).lower():
                 raise Exception(f"Database is locked. Please close other processes using the database. Error: {e}")
             elif "readonly" in str(e).lower():
-                raise Exception(f"Database is read-only. Check file permissions: {self.db_path}")
+                # Try to fix permissions and retry
+                try:
+                    if self.db_path.exists():
+                        os.chmod(self.db_path, 0o664)
+                    # Retry connection
+                    conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
+                    conn.row_factory = sqlite3.Row
+                    return conn
+                except Exception as retry_error:
+                    raise Exception(f"Database is read-only. Check file permissions: {self.db_path}. Tried to fix but failed: {retry_error}")
             else:
                 raise
 

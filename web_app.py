@@ -1623,9 +1623,22 @@ def add_account_tdata():
                     creds = json.load(f)
                 
                 phone = creds.get('phone')
-                api_id = int(creds.get('api_id'))
+                api_id_str = creds.get('api_id')
                 api_hash = creds.get('api_hash')
                 password = creds.get('password')
+                
+                # Validate required fields
+                if not phone:
+                    return {'success': False, 'error': 'Phone number is required in JSON file'}
+                if not api_id_str:
+                    return {'success': False, 'error': 'API ID is required in JSON file'}
+                if not api_hash:
+                    return {'success': False, 'error': 'API Hash is required in JSON file'}
+                
+                try:
+                    api_id = int(api_id_str)
+                except (ValueError, TypeError):
+                    return {'success': False, 'error': f'Invalid API ID format: {api_id_str}. Must be a number.'}
                 
                 sessions_dir = Path(__file__).parent / 'sessions'
                 sessions_dir.mkdir(exist_ok=True)
