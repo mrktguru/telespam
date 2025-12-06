@@ -1656,7 +1656,14 @@ def add_account_tdata():
                     return {'success': False, 'error': f'Invalid API ID format: {api_id_str}. Must be a number.'}
                 
                 sessions_dir = Path(__file__).parent / 'sessions'
-                sessions_dir.mkdir(exist_ok=True)
+                try:
+                    sessions_dir.mkdir(parents=True, exist_ok=True)
+                    # Ensure directory is writable
+                    if not os.access(sessions_dir, os.W_OK):
+                        os.chmod(sessions_dir, 0o755)
+                except Exception as e:
+                    return {'success': False, 'error': f'Failed to create sessions directory: {str(e)}'}
+                
                 session_file = sessions_dir / f"{phone.replace('+', '')}.session"
                 
                 client = TelegramClient(str(session_file.with_suffix('')), api_id, api_hash)
@@ -1676,7 +1683,9 @@ def add_account_tdata():
                         'last_name': me.last_name or '',
                         'session_file': str(session_file),
                         'status': 'active',
-                        'notes': notes or 'Web added from JSON'
+                        'notes': notes or 'Web added from JSON',
+                        'api_id': api_id,  # Store API credentials
+                        'api_hash': api_hash  # Store API credentials
                     }
                     
                     add_result = await add_account(account_data)

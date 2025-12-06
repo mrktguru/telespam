@@ -315,6 +315,7 @@ async def add_account(account_data: Dict) -> Dict:
         # Add to database
         from database import db
         from datetime import datetime
+        import traceback
         
         # Ensure all required fields
         account['added_at'] = account.get('added_at', datetime.now().isoformat())
@@ -323,23 +324,40 @@ async def add_account(account_data: Dict) -> Dict:
         account['total_sent'] = account.get('total_sent', 0)
         account['flood_count'] = account.get('flood_count', 0)
         
-        success = db.add_account(account)
+        # Log account data before adding (for debugging)
+        print(f"DEBUG: Adding account to database: id={account.get('id')}, phone={account.get('phone')}, api_id={account.get('api_id')}")
+        
+        try:
+            success = db.add_account(account)
+        except Exception as db_error:
+            error_trace = traceback.format_exc()
+            print(f"ERROR: Database error when adding account: {db_error}")
+            print(f"ERROR: Traceback: {error_trace}")
+            return {
+                "success": False,
+                "error": f"Database error: {str(db_error)}"
+            }
 
         if success:
+            print(f"DEBUG: Account {account.get('id')} added successfully")
             return {
                 "success": True,
                 "account": account
             }
         else:
+            print(f"ERROR: db.add_account returned False for account {account.get('id')}")
             return {
                 "success": False,
-                "error": "Failed to add account to database"
+                "error": "Failed to add account to database (db.add_account returned False)"
             }
 
     except Exception as e:
+        error_trace = traceback.format_exc()
+        print(f"ERROR: Exception in add_account: {e}")
+        print(f"ERROR: Traceback: {error_trace}")
         return {
             "success": False,
-            "error": str(e)
+            "error": f"Error: {str(e)}"
         }
 
 

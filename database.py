@@ -1533,10 +1533,15 @@ class Database:
                 account.get('api_hash')
             ))
             conn.commit()
+            conn.close()
             return True
         except sqlite3.OperationalError as e:
             conn.rollback()
+            conn.close()
             error_str = str(e).lower()
+            import traceback
+            print(f"ERROR: SQLite OperationalError in add_account: {e}")
+            print(f"ERROR: Traceback: {traceback.format_exc()}")
             if "readonly" in error_str or "read-only" in error_str:
                 # Try to fix permissions and retry
                 try:
