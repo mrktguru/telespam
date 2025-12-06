@@ -1590,8 +1590,19 @@ class Database:
                     conn.close()
                     conn = self.get_connection()
                     cursor = conn.cursor()
+                    
+                    # Check for duplicate again before retry
+                    phone = account.get('phone')
+                    if phone:
+                        cursor.execute('SELECT id FROM accounts WHERE phone = ?', (phone,))
+                        existing = cursor.fetchone()
+                        if existing:
+                            print(f"WARNING: Account with phone {phone} already exists (ID: {existing['id']}), skipping duplicate")
+                            conn.close()
+                            return False
+                    
                     cursor.execute('''
-                        INSERT OR REPLACE INTO accounts (
+                        INSERT INTO accounts (
                             id, phone, username, first_name, last_name, bio, session_file,
                             status, daily_sent, total_sent, cooldown_until, last_used_at,
                             added_at, flood_count, use_proxy, proxy, proxy_type, proxy_host,
