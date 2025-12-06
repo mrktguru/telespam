@@ -2119,8 +2119,10 @@ def add_account_tdata():
                 
                 session_file = sessions_dir / f"{phone.replace('+', '')}.session"
                 
-                # CRITICAL: Always use API credentials from config for creating client
-                client = TelegramClient(str(session_file.with_suffix('')), config.API_ID, config.API_HASH)
+                # CRITICAL: Use API credentials from JSON file - session must be created with these credentials
+                # Telethon requires that session file and API credentials match
+                print(f"DEBUG: Using API credentials from JSON file: api_id={api_id}, api_hash={api_hash[:10]}...")
+                client = TelegramClient(str(session_file.with_suffix('')), api_id, api_hash)
                 
                 try:
                     await client.connect()
@@ -2139,11 +2141,9 @@ def add_account_tdata():
                         if existing_phone == phone_normalized_check:
                             return {'success': False, 'error': f'Account with phone {phone_from_me} already exists (ID: {existing.get("id")})'}
                     
-                    # CRITICAL: Always use API credentials from config, not from JSON file
-                    # All accounts must use the same API credentials for consistency
-                    # The session file will be recreated with correct credentials if needed
-                    print(f"DEBUG: Using API credentials from config for JSON account: api_id={config.API_ID}, api_hash={config.API_HASH[:10]}...")
-                    print(f"DEBUG: JSON file had: api_id={api_id}, api_hash={api_hash[:10]}... (ignored, using config)")
+                    # CRITICAL: Store the API credentials that were used to create the session
+                    # These must match when connecting to the session later
+                    print(f"DEBUG: Storing API credentials used to create session: api_id={api_id}, api_hash={api_hash[:10]}...")
                     
                     account_data = {
                         'phone': me.phone,
@@ -2153,8 +2153,8 @@ def add_account_tdata():
                         'session_file': str(session_file),
                         'status': 'active',
                         'notes': notes or 'Web added from JSON',
-                        'api_id': config.API_ID,  # CRITICAL: Always use config values
-                        'api_hash': config.API_HASH  # CRITICAL: Always use config values
+                        'api_id': api_id,  # CRITICAL: Store credentials used to create session
+                        'api_hash': api_hash  # CRITICAL: Store credentials used to create session
                     }
                     
                     add_result = await add_account(account_data)
@@ -2178,13 +2178,16 @@ def add_account_tdata():
                         if existing_phone == phone_normalized_check:
                             return {'success': False, 'error': f'Account with phone {phone_from_result} already exists (ID: {existing.get("id")})'}
                     
-                    # CRITICAL: Always use API credentials from config, not from converter
-                    # All accounts must use the same API credentials for consistency
-                    print(f"DEBUG: Using API credentials from config for TDATA/SESSION account: api_id={config.API_ID}, api_hash={config.API_HASH[:10]}...")
-                    if account_data.get('api_id') != config.API_ID or account_data.get('api_hash') != config.API_HASH:
-                        print(f"DEBUG: Converter provided different credentials (api_id={account_data.get('api_id')}, api_hash={account_data.get('api_hash', '')[:10]}...), overriding with config values")
-                    account_data['api_id'] = config.API_ID
-                    account_data['api_hash'] = config.API_HASH
+                    # CRITICAL: Keep the API credentials from converter - they were used to create the session
+                    # Telethon requires that session file and API credentials match
+                    # Only set config values if converter didn't provide them
+                    if not account_data.get('api_id') or not account_data.get('api_hash'):
+                        print(f"DEBUG: Converter didn't provide API credentials, using config: api_id={config.API_ID}, api_hash={config.API_HASH[:10]}...")
+                        account_data['api_id'] = config.API_ID
+                        account_data['api_hash'] = config.API_HASH
+                    else:
+                        print(f"DEBUG: Using API credentials from converter: api_id={account_data.get('api_id')}, api_hash={account_data.get('api_hash', '')[:10]}...")
+                        print(f"DEBUG: These credentials were used to create the session file")
                     
                     # Ensure all required fields have defaults
                     account_data.setdefault('last_name', '')
@@ -2251,8 +2254,10 @@ def add_account_manual():
             sessions_dir.mkdir(exist_ok=True)
             session_file = sessions_dir / f"{session_name}.session"
             
-            # CRITICAL: Always use API credentials from config for creating client
-            client = TelegramClient(str(session_file.with_suffix('')), config.API_ID, config.API_HASH)
+            # CRITICAL: Use API credentials from form - session must be created with these credentials
+            # Telethon requires that session file and API credentials match
+            print(f"DEBUG: Using API credentials from form for manual account: api_id={api_id}, api_hash={api_hash[:10]}...")
+            client = TelegramClient(str(session_file.with_suffix('')), api_id, api_hash)
             
             try:
                 await client.connect()
@@ -2273,10 +2278,9 @@ def add_account_manual():
                     if existing_phone == phone_normalized_check:
                         return {'success': False, 'error': f'Account with phone {phone} already exists (ID: {existing.get("id")})'}
                 
-                # CRITICAL: Always use API credentials from config, not from form
-                # All accounts must use the same API credentials for consistency
-                print(f"DEBUG: Using API credentials from config for manual account: api_id={config.API_ID}, api_hash={config.API_HASH[:10]}...")
-                print(f"DEBUG: Form provided: api_id={api_id}, api_hash={api_hash[:10]}... (ignored, using config)")
+                # CRITICAL: Store the API credentials that were used to create the session
+                # These must match when connecting to the session later
+                print(f"DEBUG: Storing API credentials used to create session: api_id={api_id}, api_hash={api_hash[:10]}...")
                 
                 account_data = {
                     'phone': me.phone,
@@ -2286,8 +2290,8 @@ def add_account_manual():
                     'session_file': str(session_file),
                     'status': 'active',
                     'notes': notes or 'Web added manually',
-                    'api_id': config.API_ID,  # CRITICAL: Always use config values
-                    'api_hash': config.API_HASH  # CRITICAL: Always use config values
+                    'api_id': api_id,  # CRITICAL: Store credentials used to create session
+                    'api_hash': api_hash  # CRITICAL: Store credentials used to create session
                 }
                 
                 add_result = await add_account(account_data)
