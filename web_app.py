@@ -210,7 +210,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             
             # Check cache first
             cache_key = f"{user_id_value}"
-        target = None
+            target = None
             method_used = None
             
             if cache_key in user_entity_cache:
@@ -229,7 +229,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                         # Cache successful resolution
                         user_entity_cache[cache_key] = target
                         print(f"DEBUG: ✓ Found user via get_entity: {user_id_value} (cached)")
-            except Exception as e:
+                except Exception as e:
                     print(f"DEBUG: get_entity failed: {e}")
             
             # Strategy 2: Try GetUsersRequest to get access_hash BEFORE sending
@@ -273,7 +273,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                 print(f"DEBUG: User object class: {user_obj.__class__.__name__}")
                     elif not target:
                         print(f"DEBUG: GetUsersRequest returned empty result or failed")
-            except Exception as e:
+                except Exception as e:
                     print(f"DEBUG: GetUsersRequest failed: {e} (type: {type(e)})")
                     import traceback
                     print(f"DEBUG: GetUsersRequest traceback: {traceback.format_exc()}")
@@ -296,7 +296,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             if username:
                                 user_entity_cache[f"username:{username}"] = target
                             print(f"DEBUG: ✓ Got access_hash via ResolveUsernameRequest for username: {username} (cached)")
-            except Exception as e:
+                except Exception as e:
                     print(f"DEBUG: ResolveUsernameRequest failed: {e}")
             
             # Strategy 4: Try GetFullUserRequest as last resort
@@ -332,34 +332,34 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                     print(f"DEBUG: Direct user_id fallback setup failed: {e}")
             
             # If still no target, we cannot send - need access_hash
-        if not target:
-            await client.disconnect()
+            if not target:
+                await client.disconnect()
                 return False, f'User not accessible: {user.get("user_id")}. Could not resolve user entity (no access_hash). User may not be accessible via API or may have privacy restrictions. Tried: get_entity, GetUsersRequest, ResolveUsernameRequest, GetFullUserRequest.'
 
-        # Send message with or without media, using HTML parsing
+            # Send message with or without media, using HTML parsing
             try:
-        if media_path and media_type:
-            media_file = Path(media_path)
-            if media_file.exists():
-                print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+                if media_path and media_type:
+                    media_file = Path(media_path)
+                    if media_file.exists():
+                        print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
                         # Send with media
-                if media_type == 'photo':
-                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                elif media_type == 'video':
-                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                elif media_type == 'audio':
-                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-            else:
-                print(f"DEBUG: Media file not found: {media_path}")
-                # File doesn't exist, send text only
-                await client.send_message(target, message_text, parse_mode='html')
-        else:
-            # Send text only with HTML formatting
-            await client.send_message(target, message_text, parse_mode='html')
-            
+                        if media_type == 'photo':
+                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        elif media_type == 'video':
+                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        elif media_type == 'audio':
+                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                    else:
+                        print(f"DEBUG: Media file not found: {media_path}")
+                        # File doesn't exist, send text only
+                        await client.send_message(target, message_text, parse_mode='html')
+                else:
+                    # Send text only with HTML formatting
+                    await client.send_message(target, message_text, parse_mode='html')
+                
                 # Log successful method
                 print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
-        await client.disconnect()
+                await client.disconnect()
                 return True, None
                 
             except (ValueError, TypeError) as ve:
@@ -400,7 +400,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                     
                                     print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
                                     await client.disconnect()
-        return True, None
+                                    return True, None
                         except Exception as retry_e:
                             print(f"DEBUG: Retry GetUsersRequest also failed: {retry_e}")
                     
@@ -437,7 +437,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         error_str = str(e)
         # Check for invalid Peer errors
         if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
-        await client.disconnect()
+            await client.disconnect()
             return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
         # Check for InputUserEmpty or similar errors
         elif "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
@@ -753,9 +753,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-        # Mark as completed
-        db.update_campaign(campaign_id, status='completed')
-        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+            # Mark as completed
+            db.update_campaign(campaign_id, status='completed')
+            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -986,15 +986,15 @@ def new_campaign():
             account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
             if account:
                 account_id = account.get('id')
-                    # Generate new ID: acc_{phone}_{campaign_id}
+                # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
-                    
-                    # Update account with new ID and campaign_id
+                new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                
+                # Update account with new ID and campaign_id
                 update_account(account_id, {
-                        'new_id': new_account_id,
-                        'campaign_id': campaign_id
-                    })
+                    'new_id': new_account_id,
+                    'campaign_id': campaign_id
+                })
         flash('Campaign created! Starting...', 'success')
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
 
@@ -1473,7 +1473,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-        acc['rate_limits'] = stats
+                acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
