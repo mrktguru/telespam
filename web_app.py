@@ -53,6 +53,10 @@ campaign_stop_flags = {}
 # Global dictionary to store active registration sessions (phone -> TelegramClient)
 registration_sessions = {}
 
+# Cache for successfully resolved user entities (user_id -> InputPeerUser)
+# This avoids repeated GetUsersRequest calls for the same user
+user_entity_cache = {}
+
 # Initialize managers
 rate_limiter = RateLimiter()
 proxy_manager = ProxyManager()
@@ -151,8 +155,8 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             return False, 'Account not authorized - session expired or invalid'
 
         # Find user by ID only (from XLS table)
-        # For sending to unknown users (not in contacts), we need to get access_hash
-        # Try multiple approaches to find user and get access_hash
+        # PRIORITY: USER_ID
+        # Strategy: Try direct send first, then GetUsersRequest if needed, with caching
         
         if not user.get('user_id'):
             await client.disconnect()
@@ -168,31 +172,107 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             user_id_value = int(user_id_str)
             print(f"DEBUG: Sending to user ID: {user_id_value} (original: {user.get('user_id')})")
             
-            # PRIORITY: USER_ID - pass directly to send_message/send_file
-            # This is the same approach as sender.py (CLI) - Telethon handles entity resolution
-            # Works for users in contacts, previously contacted, or accessible via API
-            print(f"DEBUG: Sending directly to user_id: {user_id_value} (same as CLI)")
+            # Check cache first
+            cache_key = f"{user_id_value}"
+            target = None
+            method_used = None
+            
+            if cache_key in user_entity_cache:
+                target = user_entity_cache[cache_key]
+                method_used = "cache"
+                print(f"DEBUG: ✓ Using cached entity for ID: {user_id_value}")
+            
+            # Strategy 1: Try get_entity first (works if user in contacts or was contacted)
+            if not target:
+                try:
+                    entity = await client.get_entity(user_id_value)
+                    from telethon.tl.types import InputPeerUser
+                    if hasattr(entity, 'access_hash'):
+                        target = InputPeerUser(user_id=entity.id, access_hash=entity.access_hash)
+                        method_used = "get_entity"
+                        # Cache successful resolution
+                        user_entity_cache[cache_key] = target
+                        print(f"DEBUG: ✓ Found user via get_entity: {user_id_value} (cached)")
+                except Exception as e:
+                    print(f"DEBUG: get_entity failed: {e}")
+            
+            # Strategy 2: Try direct send first (most reliable for known users)
+            # If target not found, use user_id directly
+            if not target:
+                target = user_id_value
+                method_used = "direct_user_id"
+                print(f"DEBUG: Strategy: Trying direct send to user_id: {user_id_value}")
             
             # Send message with or without media, using HTML parsing
-            # Pass user_id directly - Telethon will attempt to resolve automatically
-            if media_path and media_type:
-                media_file = Path(media_path)
-                if media_file.exists():
-                    print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
-                    # Send with media - pass user_id directly
-                    if media_type == 'photo':
-                        await client.send_file(user_id_value, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'video':
-                        await client.send_file(user_id_value, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'audio':
-                        await client.send_file(user_id_value, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+            try:
+                if media_path and media_type:
+                    media_file = Path(media_path)
+                    if media_file.exists():
+                        print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+                        # Send with media
+                        if media_type == 'photo':
+                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        elif media_type == 'video':
+                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        elif media_type == 'audio':
+                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                    else:
+                        print(f"DEBUG: Media file not found: {media_path}")
+                        # File doesn't exist, send text only
+                        await client.send_message(target, message_text, parse_mode='html')
                 else:
-                    print(f"DEBUG: Media file not found: {media_path}")
-                    # File doesn't exist, send text only
-                    await client.send_message(user_id_value, message_text, parse_mode='html')
-            else:
-                # Send text only with HTML formatting - pass user_id directly
-                await client.send_message(user_id_value, message_text, parse_mode='html')
+                    # Send text only with HTML formatting
+                    await client.send_message(target, message_text, parse_mode='html')
+                
+                # Log successful method
+                print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
+                await client.disconnect()
+                return True, None
+                
+            except ValueError as ve:
+                error_str = str(ve)
+                # Check for InputUserEmpty or similar errors
+                if "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
+                    print(f"DEBUG: Direct send failed with entity error, trying GetUsersRequest: {error_str}")
+                    # Strategy 3: Try GetUsersRequest as fallback
+                    try:
+                        from telethon.tl.functions.users import GetUsersRequest
+                        from telethon.tl.types import InputPeerUser
+                        print(f"DEBUG: Strategy 3: Trying GetUsersRequest for ID: {user_id_value}")
+                        users_result = await client(GetUsersRequest([user_id_value]))
+                        if users_result and len(users_result) > 0:
+                            user_obj = users_result[0]
+                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                            method_used = "GetUsersRequest_after_error"
+                            # Cache successful resolution
+                            user_entity_cache[cache_key] = target
+                            print(f"DEBUG: ✓ Got access_hash via GetUsersRequest after error for ID: {user_id_value} (cached)")
+                            
+                            # Retry send with proper entity
+                            if media_path and media_type:
+                                media_file = Path(media_path)
+                                if media_file.exists():
+                                    if media_type == 'photo':
+                                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                    elif media_type == 'video':
+                                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                    elif media_type == 'audio':
+                                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                else:
+                                    await client.send_message(target, message_text, parse_mode='html')
+                            else:
+                                await client.send_message(target, message_text, parse_mode='html')
+                            
+                            print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
+                            await client.disconnect()
+                            return True, None
+                    except Exception as e2:
+                        print(f"DEBUG: GetUsersRequest after error also failed: {e2}")
+                        await client.disconnect()
+                        return False, f'User not accessible: {user.get("user_id")}. Could not resolve user entity. Error: {error_str}'
+                else:
+                    # Other ValueError, re-raise
+                    raise
             
             await client.disconnect()
             return True, None
@@ -206,13 +286,20 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         return False, f'FloodWait: {e.seconds} seconds'
     except UserPrivacyRestrictedError:
         await client.disconnect()
-        return False, 'User privacy settings prevent messaging'
+        # Log privacy restriction for statistics
+        print(f"DEBUG: ✗ User {user.get('user_id')} has privacy settings that prevent messaging from unknown users")
+        return False, 'User privacy settings prevent messaging from unknown users. The user may need to add you to contacts first.'
     except PeerFloodError:
         await client.disconnect()
         return False, 'Peer flood - account limited'
     except Exception as e:
+        error_str = str(e)
+        # Check for InputUserEmpty or similar errors
+        if "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
+                await client.disconnect()
+                return False, f'User not accessible: {user.get("user_id")}. Could not find user entity. User may not be accessible via API or may have privacy restrictions.'
         await client.disconnect()
-        return False, str(e)
+        return False, f'Error sending to user {user.get("user_id")}: {error_str}'
 
 
 def run_campaign_task(campaign_id):
@@ -521,9 +608,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
+        # Mark as completed
             db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -758,7 +845,7 @@ def new_campaign():
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
                 new_account_id = f"acc_{phone_clean}_{campaign_id}"
                     
-                # Update account with new ID and campaign_id
+                    # Update account with new ID and campaign_id
                 update_account(account_id, {
                         'new_id': new_account_id,
                         'campaign_id': campaign_id
