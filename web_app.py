@@ -199,14 +199,38 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             return False, 'User ID is required'
         
         try:
-            # Convert user_id to int (can be string from DB)
-            user_id_str = str(user['user_id']).strip()
-            if not user_id_str:
-                await client.disconnect()
-                return False, 'User ID is empty'
+            # DIAGNOSTIC: Log raw data from database before processing
+            print(f"DEBUG: ===== MIGRATION DIAGNOSTIC: Raw user data from SQLite =====")
+            print(f"DEBUG: Full user dict: {user}")
+            print(f"DEBUG: user['user_id'] = {user.get('user_id')} (type: {type(user.get('user_id'))})")
+            print(f"DEBUG: user['username'] = {user.get('username')} (type: {type(user.get('username'))})")
+            print(f"DEBUG: user['phone'] = {user.get('phone')} (type: {type(user.get('phone'))})")
             
-            user_id_value = int(user_id_str)
-            print(f"DEBUG: Sending to user ID: {user_id_value} (original: {user.get('user_id')})")
+            # Convert user_id to int (can be string from DB)
+            raw_user_id = user.get('user_id')
+            if raw_user_id is None:
+                await client.disconnect()
+                print(f"DEBUG: ERROR: user_id is None in database!")
+                return False, 'User ID is None in database - migration issue?'
+            
+            user_id_str = str(raw_user_id).strip()
+            if not user_id_str or user_id_str == 'None' or user_id_str == '':
+                await client.disconnect()
+                print(f"DEBUG: ERROR: user_id is empty after conversion: '{user_id_str}'")
+                return False, f'User ID is empty after conversion: "{user_id_str}" (original: {raw_user_id}, type: {type(raw_user_id)})'
+            
+            # Try to convert to int
+            try:
+                user_id_value = int(user_id_str)
+            except (ValueError, TypeError) as conv_error:
+                await client.disconnect()
+                print(f"DEBUG: ERROR: Cannot convert user_id to int: '{user_id_str}' (type: {type(user_id_str)})")
+                print(f"DEBUG: Conversion error: {conv_error}")
+                return False, f'Invalid user_id format: "{user_id_str}" (type: {type(user_id_str)}). Cannot convert to int. Migration issue?'
+            
+            print(f"DEBUG: ✓ Successfully converted user_id: '{raw_user_id}' (type: {type(raw_user_id)}) -> {user_id_value} (int)")
+            print(f"DEBUG: Sending to user ID: {user_id_value} (original from DB: {raw_user_id}, type: {type(raw_user_id)})")
+            print(f"DEBUG: ===== END MIGRATION DIAGNOSTIC =====")
             
             # Check cache first
             cache_key = f"{user_id_value}"
@@ -684,6 +708,20 @@ def run_campaign_task(campaign_id):
 
         # Get users from campaign_users table (new system)
         campaign_users = db.get_campaign_users(campaign_id)
+        
+        # DIAGNOSTIC: Log raw data from database
+        print(f"DEBUG: ===== MIGRATION DIAGNOSTIC: Reading users from SQLite =====")
+        print(f"DEBUG: Total users from DB: {len(campaign_users)}")
+        if campaign_users:
+            print(f"DEBUG: First user sample from DB:")
+            first_user = campaign_users[0]
+            print(f"DEBUG:   Full dict: {first_user}")
+            print(f"DEBUG:   user_id = {first_user.get('user_id')} (type: {type(first_user.get('user_id'))})")
+            print(f"DEBUG:   username = {first_user.get('username')} (type: {type(first_user.get('username'))})")
+            print(f"DEBUG:   phone = {first_user.get('phone')} (type: {type(first_user.get('phone'))})")
+            print(f"DEBUG:   All keys: {list(first_user.keys())}")
+        print(f"DEBUG: ===== END MIGRATION DIAGNOSTIC =====")
+        
         # Filter only pending users
         users = [cu for cu in campaign_users if cu.get('status', 'pending') == 'pending']
 

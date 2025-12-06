@@ -948,7 +948,31 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
 
-        return [dict(row) for row in rows]
+        # Convert rows to dicts and ensure proper data types
+        result = []
+        for row in rows:
+            user_dict = dict(row)
+            # DIAGNOSTIC: Log raw data from SQLite
+            print(f"DEBUG: Raw SQLite row for user: {dict(row)}")
+            print(f"DEBUG:   user_id from SQLite: {user_dict.get('user_id')} (type: {type(user_dict.get('user_id'))})")
+            
+            # Ensure user_id is preserved as-is (can be string or None)
+            # Don't convert here - let the calling code handle conversion
+            # But ensure it's not empty string if it should be None
+            if user_dict.get('user_id') == '':
+                user_dict['user_id'] = None
+                print(f"DEBUG:   WARNING: Empty string user_id converted to None")
+            
+            # Same for username and phone
+            if user_dict.get('username') == '':
+                user_dict['username'] = None
+            if user_dict.get('phone') == '':
+                user_dict['phone'] = None
+            
+            result.append(user_dict)
+        
+        print(f"DEBUG: Returning {len(result)} users from get_campaign_users")
+        return result
 
     def get_all_campaign_users(self) -> List[Dict]:
         """Get all users with campaign information for Users for Outreach"""
