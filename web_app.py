@@ -331,10 +331,51 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 except Exception as e:
                     print(f"DEBUG: Direct user_id fallback setup failed: {e}")
             
+            # Strategy 6: Last resort - try InputUser with access_hash=0
+            # Sometimes this works if the user was previously contacted
+            if not target:
+                try:
+                    from telethon.tl.types import InputUser, InputPeerUser
+                    print(f"DEBUG: Strategy 6: Trying InputUser with access_hash=0 for ID: {user_id_value}")
+                    # Try to create InputUser with access_hash=0
+                    input_user = InputUser(user_id=user_id_value, access_hash=0)
+                    # Try to get entity using this InputUser
+                    try:
+                        entity = await client.get_entity(input_user)
+                        if hasattr(entity, 'access_hash') and entity.access_hash:
+                            target = InputPeerUser(user_id=entity.id, access_hash=entity.access_hash)
+                            method_used = "InputUser_access_hash_0"
+                            user_entity_cache[cache_key] = target
+                            print(f"DEBUG: ✓ Got access_hash via InputUser(access_hash=0) for ID: {user_id_value} (cached)")
+                    except Exception as e:
+                        print(f"DEBUG: InputUser(access_hash=0) get_entity failed: {e}")
+                        # Still try to use it directly as last resort
+                        target = user_id_value
+                        method_used = "direct_user_id_last_resort"
+                        print(f"DEBUG: Using direct user_id as absolute last resort")
+                except Exception as e:
+                    print(f"DEBUG: InputUser(access_hash=0) setup failed: {e}")
+            
             # If still no target, we cannot send - need access_hash
             if not target:
                 await client.disconnect()
-                return False, f'User not accessible: {user.get("user_id")}. Could not resolve user entity (no access_hash). User may not be accessible via API or may have privacy restrictions. Tried: get_entity, GetUsersRequest, ResolveUsernameRequest, GetFullUserRequest.'
+                error_details = []
+                error_details.append("Tried methods:")
+                error_details.append("1. get_entity(user_id)")
+                error_details.append("2. GetUsersRequest([user_id])")
+                if user.get('username'):
+                    error_details.append(f"3. ResolveUsernameRequest(username={user.get('username')})")
+                else:
+                    error_details.append("3. ResolveUsernameRequest (skipped - no username)")
+                error_details.append("4. GetFullUserRequest")
+                error_details.append("5. Direct user_id send")
+                error_details.append("6. InputUser(access_hash=0)")
+                error_details.append("")
+                error_details.append("All methods failed. This usually means:")
+                error_details.append("- User has privacy settings preventing messages from unknown users")
+                error_details.append("- User was never contacted before and is not in contacts")
+                error_details.append("- User account may be restricted or deleted")
+                return False, f'User not accessible: {user.get("user_id")}. Could not resolve user entity (no access_hash). {" | ".join(error_details)}'
 
             # Send message with or without media, using HTML parsing
             try:
@@ -408,9 +449,14 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                     return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
                 # Check for InputUserEmpty or similar errors
                 elif "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
-                    print(f"DEBUG: Entity error: {error_str}")
+                    print(f"DEBUG: Entity error with method {method_used}: {error_str}")
+                    print(f"DEBUG: User ID: {user_id_value}, Username: {user.get('username')}, Phone: {user.get('phone')}")
                     await client.disconnect()
-                    return False, f'User not accessible: {user.get("user_id")}. Could not find the input entity. User may not be accessible via API or may have privacy restrictions. Error: {error_str}'
+                    methods_tried = []
+                    if method_used:
+                        methods_tried.append(f"Last tried: {method_used}")
+                    methods_tried.append("All resolution methods failed (get_entity, GetUsersRequest, ResolveUsernameRequest, etc.)")
+                    return False, f'User not accessible: {user.get("user_id")}. Could not find the input entity. {" | ".join(methods_tried)}. User may not be accessible via API or may have privacy restrictions. Error: {error_str}'
                 else:
                     # Other ValueError/TypeError, re-raise
                     raise
@@ -441,8 +487,24 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
         # Check for InputUserEmpty or similar errors
         elif "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
+            print(f"DEBUG: General exception handler - Entity error: {error_str}")
+            print(f"DEBUG: User ID: {user.get('user_id')}, Username: {user.get('username')}, Phone: {user.get('phone')}")
             await client.disconnect()
-            return False, f'User not accessible: {user.get("user_id")}. Could not find user entity. User may not be accessible via API or may have privacy restrictions.'
+            methods_info = []
+            methods_info.append("Resolution methods attempted:")
+            methods_info.append("1. get_entity(user_id)")
+            methods_info.append("2. GetUsersRequest([user_id])")
+            if user.get('username'):
+                methods_info.append(f"3. ResolveUsernameRequest(username={user.get('username')})")
+            methods_info.append("4. GetFullUserRequest")
+            methods_info.append("5. Direct user_id send")
+            methods_info.append("6. InputUser(access_hash=0)")
+            methods_info.append("")
+            methods_info.append("Possible reasons:")
+            methods_info.append("- User privacy settings prevent messages from unknown users")
+            methods_info.append("- User was never contacted and is not in contacts")
+            methods_info.append("- User account may be restricted or deleted")
+            return False, f'User not accessible: {user.get("user_id")}. Could not find user entity. {" | ".join(methods_info)} Error: {error_str}'
         await client.disconnect()
         return False, f'Error sending to user {user.get("user_id")}: {error_str}'
 
