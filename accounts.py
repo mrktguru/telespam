@@ -292,17 +292,17 @@ async def add_account(account_data: Dict) -> Dict:
         # Generate account ID
         account_id = generate_account_id()
 
-        # CRITICAL: Always use API credentials from config, not from account_data
-        # All accounts must use the same API credentials for consistency
-        # This ensures all accounts can send messages to unknown users
-        api_id_to_store = config.API_ID
-        api_hash_to_store = config.API_HASH
+        # CRITICAL: Store the API credentials that were used to create the session
+        # Telethon requires that session file and API credentials match
+        # Use credentials from account_data if provided, otherwise fallback to config
+        api_id_to_store = account_data.get('api_id') or config.API_ID
+        api_hash_to_store = account_data.get('api_hash') or config.API_HASH
         
-        # Log if different credentials were provided (for debugging)
-        if account_data.get('api_id') and account_data.get('api_id') != config.API_ID:
-            print(f"DEBUG: WARNING: account_data provided different api_id ({account_data.get('api_id')}), using config.API_ID ({config.API_ID})")
-        if account_data.get('api_hash') and account_data.get('api_hash') != config.API_HASH:
-            print(f"DEBUG: WARNING: account_data provided different api_hash, using config.API_HASH")
+        # Log which credentials are being stored
+        if account_data.get('api_id'):
+            print(f"DEBUG: Storing API credentials from account_data: api_id={api_id_to_store}, api_hash={api_hash_to_store[:10] if api_hash_to_store else 'None'}...")
+        else:
+            print(f"DEBUG: No API credentials in account_data, using config: api_id={api_id_to_store}, api_hash={api_hash_to_store[:10] if api_hash_to_store else 'None'}...")
         
         # Prepare account record
         account = {
@@ -314,8 +314,8 @@ async def add_account(account_data: Dict) -> Dict:
             "session_file": account_data.get('session_file'),
             "status": account_data.get('status', config.AccountStatus.WARMING),
             "notes": account_data.get('notes', ''),
-            "api_id": api_id_to_store,  # CRITICAL: Always use config values
-            "api_hash": api_hash_to_store,  # CRITICAL: Always use config values
+            "api_id": str(api_id_to_store) if api_id_to_store else None,  # CRITICAL: Store credentials used to create session
+            "api_hash": api_hash_to_store,  # CRITICAL: Store credentials used to create session
             "use_proxy": False,
             "proxy_type": "",
             "proxy_host": "",
