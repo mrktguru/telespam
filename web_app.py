@@ -65,6 +65,15 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
     if not session_file.exists():
         return False, f'Session file not found: {session_file}'
 
+    # Get API credentials - use account-specific ones if available, otherwise use config
+    api_id = account.get('api_id') or config.API_ID
+    api_hash = account.get('api_hash') or config.API_HASH
+
+    if not api_id or not api_hash:
+        return False, 'API credentials not configured (missing API_ID or API_HASH)'
+
+    print(f"DEBUG: Using API_ID = {api_id} for account {phone}")
+
     # Get proxy - priority: campaign_proxies > account proxy
     proxy = None
     proxy_id = None
@@ -114,8 +123,8 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
 
     client = TelegramClient(
         str(session_file),
-        config.API_ID,
-        config.API_HASH,
+        api_id,
+        api_hash,
         proxy=proxy
     )
 
