@@ -1598,12 +1598,24 @@ def add_account_tdata():
         
         # Save uploaded file
         upload_dir = Path(__file__).parent / 'uploads' / 'accounts'
-        upload_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            # Ensure directory is writable
+            if not os.access(upload_dir, os.W_OK):
+                os.chmod(upload_dir, 0o755)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Failed to create upload directory: {str(e)}'}), 500
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"{timestamp}_{file.filename}"
         filepath = upload_dir / filename
-        file.save(str(filepath))
+        
+        try:
+            file.save(str(filepath))
+            # Ensure file is readable
+            os.chmod(filepath, 0o644)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Failed to save uploaded file: {str(e)}'}), 500
         
         # Import converter functions
         from converter import detect_and_process
@@ -1622,18 +1634,21 @@ def add_account_tdata():
                 with open(filepath, 'r') as f:
                     creds = json.load(f)
                 
+                # Support multiple JSON formats:
+                # Standard: api_id, api_hash
+                # TelegramExpert.pro: app_id, app_hash
                 phone = creds.get('phone')
-                api_id_str = creds.get('api_id')
-                api_hash = creds.get('api_hash')
-                password = creds.get('password')
+                api_id_str = creds.get('api_id') or creds.get('app_id')  # Support both formats
+                api_hash = creds.get('api_hash') or creds.get('app_hash')  # Support both formats
+                password = creds.get('password') or creds.get('twoFA')  # Support both password fields
                 
                 # Validate required fields
                 if not phone:
-                    return {'success': False, 'error': 'Phone number is required in JSON file'}
+                    return {'success': False, 'error': 'Phone number is required in JSON file (field: phone)'}
                 if not api_id_str:
-                    return {'success': False, 'error': 'API ID is required in JSON file'}
+                    return {'success': False, 'error': 'API ID is required in JSON file (field: api_id or app_id)'}
                 if not api_hash:
-                    return {'success': False, 'error': 'API Hash is required in JSON file'}
+                    return {'success': False, 'error': 'API Hash is required in JSON file (field: api_hash or app_hash)'}
                 
                 try:
                     api_id = int(api_id_str)
