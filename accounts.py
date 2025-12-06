@@ -130,12 +130,11 @@ async def select_account_for_user(user_id: int, preferred_account_id: Optional[s
         if account and is_account_available(account):
             return account
 
-    # Check if we already have a dialog with this user
-    from sheets_loader import sheets_manager
-    dialog = sheets_manager.get_dialog(user_id)
-    if dialog and dialog.get('account_id'):
+    # Check if we already have a conversation with this user
+    conversation = db.get_conversation_by_user_id(str(user_id))
+    if conversation and conversation.get('account_id'):
         # Use the same account for continuity
-        account = db.get_account(dialog['account_id'])
+        account = db.get_account(conversation['account_id'])
         if account and is_account_available(account):
             return account
 
