@@ -814,6 +814,36 @@ class Database:
 
         return dict(row) if row else None
 
+    def get_conversation_by_user_id(self, recipient_user_id: str) -> Optional[Dict]:
+        """Get conversation by recipient user ID (for backward compatibility with get_dialog)
+        
+        Args:
+            recipient_user_id: Telegram user ID of the recipient
+            
+        Returns:
+            Conversation dict with account_id field (mapped from sender_account_id) or None
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'SELECT * FROM campaign_conversations WHERE recipient_user_id = ? ORDER BY created_at DESC LIMIT 1',
+                (str(recipient_user_id),)
+            )
+            row = cursor.fetchone()
+            
+            if row:
+                conversation = dict(row)
+                # Map sender_account_id to account_id for backward compatibility
+                conversation['account_id'] = conversation.get('sender_account_id')
+                return conversation
+            return None
+        except Exception as e:
+            print(f"Error getting conversation by user_id: {e}")
+            return None
+        finally:
+            conn.close()
+
     def get_conversation_messages(self, conversation_id: int) -> List[Dict]:
         """Get all messages in a conversation"""
         conn = self.get_connection()
@@ -1269,6 +1299,57 @@ class Database:
             print(f"Error deleting registration proxy: {e}")
             conn.rollback()
             return False
+        finally:
+            conn.close()
+
+    def add_registration_proxies_bulk(self, proxies: List[Dict]) -> int:
+        """Add multiple registration proxies at once
+        
+        Args:
+            proxies: List of proxy dictionaries
+            
+        Returns:
+            Number of successfully added proxies
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        added_count = 0
+        try:
+            for proxy_data in proxies:
+                try:
+                    cursor.execute('''
+                        INSERT INTO registration_proxies 
+                        (name, type, provider, host, port, username, password, protocol, 
+                         session_type, rotation_interval, country, exclude_countries, 
+                         total_gb_purchased, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        proxy_data.get('name'),
+                        proxy_data.get('type'),
+                        proxy_data.get('provider'),
+                        proxy_data.get('host'),
+                        proxy_data.get('port'),
+                        proxy_data.get('username'),
+                        proxy_data.get('password'),
+                        proxy_data.get('protocol', 'socks5'),
+                        proxy_data.get('session_type', 'rotating'),
+                        proxy_data.get('rotation_interval', 20),
+                        proxy_data.get('country'),
+                        json.dumps(proxy_data.get('exclude_countries', [])) if proxy_data.get('exclude_countries') else None,
+                        proxy_data.get('total_gb_purchased', 0),
+                        proxy_data.get('notes')
+                    ))
+                    added_count += 1
+                except Exception as e:
+                    print(f"Error adding proxy {proxy_data.get('name', 'unknown')}: {e}")
+                    continue
+            
+            conn.commit()
+            return added_count
+        except Exception as e:
+            print(f"Error in bulk add registration proxies: {e}")
+            conn.rollback()
+            return added_count
         finally:
             conn.close()
 

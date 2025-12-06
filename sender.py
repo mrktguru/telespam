@@ -11,7 +11,7 @@ from telethon.errors import (
     PeerIdInvalidError
 )
 import config
-from sheets_loader import sheets_manager
+from database import db
 from proxy import get_client, get_proxy_config
 from accounts import (
     select_account_for_user,
@@ -88,8 +88,17 @@ async def send_message(
                 "error_code": config.ErrorCode.NO_AVAILABLE_ACCOUNTS
             }
 
-        # Get settings
-        settings = sheets_manager.get_settings()
+        # Get settings from config
+        settings = {
+            "proxy_enabled": config.PROXY_ENABLED,
+            "default_proxy_type": config.DEFAULT_PROXY_TYPE,
+            "default_proxy_host": config.DEFAULT_PROXY_HOST,
+            "default_proxy_port": config.DEFAULT_PROXY_PORT,
+            "default_proxy_user": config.DEFAULT_PROXY_USER,
+            "default_proxy_pass": config.DEFAULT_PROXY_PASS,
+            "api_id": config.API_ID,
+            "api_hash": config.API_HASH
+        }
 
         # Create client
         client = await get_client(selected_account, settings)
@@ -302,17 +311,18 @@ async def get_dialog_history(user_id: int, limit: int = 50) -> Dict:
     """
 
     try:
-        # Find which account has dialog with this user
-        dialog = sheets_manager.get_dialog(user_id)
+        # Find which account has conversation with this user
+        from database import db
+        conversation = db.get_conversation_by_user_id(str(user_id))
 
-        if not dialog:
+        if not conversation:
             return {
                 "success": False,
-                "error": "No dialog found with this user"
+                "error": "No conversation found with this user"
             }
 
-        account_id = dialog.get('account_id')
-        account = sheets_manager.get_account(account_id)
+        account_id = conversation.get('account_id')
+        account = db.get_account(account_id)
 
         if not account:
             return {
