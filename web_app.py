@@ -232,6 +232,21 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             print(f"DEBUG: Sending to user ID: {user_id_value} (original from DB: {raw_user_id}, type: {type(raw_user_id)})")
             print(f"DEBUG: ===== END MIGRATION DIAGNOSTIC =====")
             
+            # CRITICAL FIX: Ensure user_id_value is int, not string
+            # Telethon requires INTEGER, not STRING for user_id
+            if not isinstance(user_id_value, int):
+                print(f"DEBUG: WARNING: user_id_value is not int! Converting: {user_id_value} (type: {type(user_id_value)})")
+                try:
+                    user_id_value = int(user_id_value)
+                    print(f"DEBUG: ✓ Converted to int: {user_id_value} (type: {type(user_id_value)})")
+                except (ValueError, TypeError) as e:
+                    await client.disconnect()
+                    return False, f'Cannot convert user_id to int: {user_id_value} (type: {type(user_id_value)}). Error: {e}'
+            
+            # Verify it's actually int
+            assert isinstance(user_id_value, int), f"user_id_value must be int, got {type(user_id_value)}"
+            print(f"DEBUG: ✓ Verified user_id_value is int: {user_id_value} (type: {type(user_id_value)})")
+            
             # Check cache first
             cache_key = f"{user_id_value}"
             target = None
@@ -245,6 +260,10 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             # Strategy 1: Try get_entity first (works if user in contacts or was contacted)
             if not target:
                 try:
+                    # CRITICAL: Ensure user_id_value is int for get_entity
+                    if not isinstance(user_id_value, int):
+                        print(f"DEBUG: WARNING: user_id_value is not int in get_entity! Converting...")
+                        user_id_value = int(user_id_value)
                     entity = await client.get_entity(user_id_value)
                     from telethon.tl.types import InputPeerUser
                     if hasattr(entity, 'access_hash'):
@@ -262,7 +281,11 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 try:
                     from telethon.tl.functions.users import GetUsersRequest
                     from telethon.tl.types import InputPeerUser
-                    print(f"DEBUG: Strategy 2: Trying GetUsersRequest for ID: {user_id_value}")
+                    print(f"DEBUG: Strategy 2: Trying GetUsersRequest for ID: {user_id_value} (type: {type(user_id_value)})")
+                    # CRITICAL: Ensure user_id_value is int, not string
+                    if not isinstance(user_id_value, int):
+                        print(f"DEBUG: WARNING: user_id_value is not int in GetUsersRequest! Converting...")
+                        user_id_value = int(user_id_value)
                     # Try with plain int first (most common case)
                     try:
                         users_result = await client(GetUsersRequest([user_id_value]))
@@ -270,6 +293,10 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                         print(f"DEBUG: GetUsersRequest with int failed: {e1}, trying alternative...")
                         # Try alternative: get_input_entity first, then use it
                         try:
+                            # CRITICAL: Ensure user_id_value is int for get_input_entity
+                            if not isinstance(user_id_value, int):
+                                print(f"DEBUG: WARNING: user_id_value is not int in get_input_entity! Converting...")
+                                user_id_value = int(user_id_value)
                             # Sometimes get_input_entity works better
                             input_entity = await client.get_input_entity(user_id_value)
                             if hasattr(input_entity, 'user_id') and hasattr(input_entity, 'access_hash'):
@@ -361,10 +388,14 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             if not target:
                 try:
                     from telethon.tl.types import InputPeerUser
-                    print(f"DEBUG: Strategy 6: Trying InputPeerUser with access_hash=0 for ID: {user_id_value}")
+                    print(f"DEBUG: Strategy 6: Trying InputPeerUser with access_hash=0 for ID: {user_id_value} (type: {type(user_id_value)})")
                     print(f"DEBUG: This is for spam/outreach to unknown users")
                     print(f"DEBUG: Using API credentials: api_id={account_api_id}, api_hash={account_api_hash[:10]}...")
                     print(f"DEBUG: NOTE: For this to work, API credentials must be from my.telegram.org and allow messaging unknown users")
+                    # CRITICAL: Ensure user_id_value is int for InputPeerUser
+                    if not isinstance(user_id_value, int):
+                        print(f"DEBUG: WARNING: user_id_value is not int in InputPeerUser! Converting...")
+                        user_id_value = int(user_id_value)
                     # Try to create InputPeerUser with access_hash=0
                     # This sometimes works if API credentials are correct and user privacy allows
                     target = InputPeerUser(user_id=user_id_value, access_hash=0)
@@ -379,7 +410,11 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             if not target:
                 try:
                     from telethon.tl.types import InputUser, InputPeerUser
-                    print(f"DEBUG: Strategy 7: Trying InputUser with access_hash=0 for ID: {user_id_value}")
+                    print(f"DEBUG: Strategy 7: Trying InputUser with access_hash=0 for ID: {user_id_value} (type: {type(user_id_value)})")
+                    # CRITICAL: Ensure user_id_value is int for InputUser
+                    if not isinstance(user_id_value, int):
+                        print(f"DEBUG: WARNING: user_id_value is not int in InputUser! Converting...")
+                        user_id_value = int(user_id_value)
                     # Try to create InputUser with access_hash=0
                     input_user = InputUser(user_id=user_id_value, access_hash=0)
                     # Try to get entity using this InputUser
@@ -478,7 +513,11 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                         try:
                             from telethon.tl.functions.users import GetUsersRequest
                             from telethon.tl.types import InputPeerUser
-                            print(f"DEBUG: Retry: Trying GetUsersRequest with plain int for ID: {user_id_value}")
+                            print(f"DEBUG: Retry: Trying GetUsersRequest with plain int for ID: {user_id_value} (type: {type(user_id_value)})")
+                            # CRITICAL: Ensure user_id_value is int, not string
+                            if not isinstance(user_id_value, int):
+                                print(f"DEBUG: WARNING: user_id_value is not int in retry GetUsersRequest! Converting...")
+                                user_id_value = int(user_id_value)
                             # Try with plain int (not InputUser)
                             users_result = await client(GetUsersRequest([user_id_value]))
                             if users_result and len(users_result) > 0:
@@ -760,14 +799,24 @@ def run_campaign_task(campaign_id):
             account_phone = account.get('phone', 'unknown')
 
             # Get user identifier with priority: ID -> Username -> Phone
-            # Ensure user_id is properly formatted (can be string or int from DB)
+            # CRITICAL FIX: Convert user_id from STRING (SQLite TEXT) to INTEGER for Telethon
+            # Telethon requires INTEGER, not STRING for user_id
             user_id_value = user.get('user_id')
             if user_id_value:
-                # Convert to string for display, but keep original for sending
+                # Convert to int - SQLite returns TEXT as string, but Telethon needs int
                 try:
-                    user_id_value = int(user_id_value) if str(user_id_value).isdigit() else user_id_value
-                except:
-                    pass
+                    if isinstance(user_id_value, str):
+                        user_id_value = int(user_id_value.strip())
+                    elif isinstance(user_id_value, int):
+                        user_id_value = user_id_value  # Already int
+                    else:
+                        user_id_value = int(str(user_id_value).strip())
+                    print(f"DEBUG: ✓ Converted user_id to int: {user_id_value} (type: {type(user_id_value)})")
+                except (ValueError, TypeError) as e:
+                    print(f"DEBUG: ERROR: Cannot convert user_id to int: {user_id_value} (type: {type(user_id_value)}). Error: {e}")
+                    user_id_value = None  # Will fall back to username/phone
+            else:
+                user_id_value = None
             
             user_identifier = user_id_value or user.get('username') or user.get('phone') or 'unknown'
             identifier_type = 'ID' if user_id_value else ('Username' if user.get('username') else 'Phone')
