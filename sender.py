@@ -330,8 +330,17 @@ async def get_dialog_history(user_id: int, limit: int = 50) -> Dict:
                 "error": "Account not found"
             }
 
-        # Get settings
-        settings = sheets_manager.get_settings()
+        # Get settings from config
+        settings = {
+            "proxy_enabled": config.PROXY_ENABLED,
+            "default_proxy_type": config.DEFAULT_PROXY_TYPE,
+            "default_proxy_host": config.DEFAULT_PROXY_HOST,
+            "default_proxy_port": config.DEFAULT_PROXY_PORT,
+            "default_proxy_user": config.DEFAULT_PROXY_USER,
+            "default_proxy_pass": config.DEFAULT_PROXY_PASS,
+            "api_id": config.API_ID,
+            "api_hash": config.API_HASH
+        }
 
         # Create client
         client = await get_client(account, settings)
