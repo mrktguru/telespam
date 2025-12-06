@@ -167,7 +167,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         print(f"  Account: api_id={account_api_id}, api_hash={account_api_hash[:10]}...")
         print(f"  Config: api_id={config_api_id}, api_hash={config_api_hash[:10]}...")
         print(f"  This is OK if the session was created with these credentials")
-    
+
     client = TelegramClient(
         str(session_file),
         account_api_id,
@@ -210,7 +210,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             
             # Check cache first
             cache_key = f"{user_id_value}"
-            target = None
+        target = None
             method_used = None
             
             if cache_key in user_entity_cache:
@@ -229,7 +229,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                         # Cache successful resolution
                         user_entity_cache[cache_key] = target
                         print(f"DEBUG: ✓ Found user via get_entity: {user_id_value} (cached)")
-                except Exception as e:
+            except Exception as e:
                     print(f"DEBUG: get_entity failed: {e}")
             
             # Strategy 2: Try GetUsersRequest to get access_hash BEFORE sending
@@ -239,9 +239,27 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                     from telethon.tl.functions.users import GetUsersRequest
                     from telethon.tl.types import InputPeerUser
                     print(f"DEBUG: Strategy 2: Trying GetUsersRequest for ID: {user_id_value}")
-                    users_result = await client(GetUsersRequest([user_id_value]))
-                    if users_result and len(users_result) > 0:
+                    # Try with plain int first (most common case)
+                    try:
+                        users_result = await client(GetUsersRequest([user_id_value]))
+                    except Exception as e1:
+                        print(f"DEBUG: GetUsersRequest with int failed: {e1}, trying alternative...")
+                        # Try alternative: get_input_entity first, then use it
+                        try:
+                            # Sometimes get_input_entity works better
+                            input_entity = await client.get_input_entity(user_id_value)
+                            if hasattr(input_entity, 'user_id') and hasattr(input_entity, 'access_hash'):
+                                target = InputPeerUser(user_id=input_entity.user_id, access_hash=input_entity.access_hash)
+                                method_used = "get_input_entity"
+                                user_entity_cache[cache_key] = target
+                                print(f"DEBUG: ✓ Got access_hash via get_input_entity for ID: {user_id_value} (cached)")
+                        except Exception as e2:
+                            print(f"DEBUG: get_input_entity also failed: {e2}")
+                            users_result = None
+                    
+                    if not target and users_result and len(users_result) > 0:
                         user_obj = users_result[0]
+                        print(f"DEBUG: GetUsersRequest returned user: id={user_obj.id}, type={type(user_obj)}, has_access_hash={hasattr(user_obj, 'access_hash')}, access_hash={getattr(user_obj, 'access_hash', None)}")
                         if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
                             target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
                             method_used = "GetUsersRequest"
@@ -249,9 +267,16 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             user_entity_cache[cache_key] = target
                             print(f"DEBUG: ✓ Got access_hash via GetUsersRequest for ID: {user_id_value} (cached)")
                         else:
-                            print(f"DEBUG: GetUsersRequest returned user but no access_hash")
-                except Exception as e:
-                    print(f"DEBUG: GetUsersRequest failed: {e}")
+                            print(f"DEBUG: GetUsersRequest returned user but no access_hash (user_obj type: {type(user_obj)})")
+                            # Check if it's a UserEmpty or similar
+                            if hasattr(user_obj, '__class__'):
+                                print(f"DEBUG: User object class: {user_obj.__class__.__name__}")
+                    elif not target:
+                        print(f"DEBUG: GetUsersRequest returned empty result or failed")
+            except Exception as e:
+                    print(f"DEBUG: GetUsersRequest failed: {e} (type: {type(e)})")
+                    import traceback
+                    print(f"DEBUG: GetUsersRequest traceback: {traceback.format_exc()}")
             
             # Strategy 3: Try ResolveUsernameRequest if username is available
             if not target and user.get('username'):
@@ -271,45 +296,114 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             if username:
                                 user_entity_cache[f"username:{username}"] = target
                             print(f"DEBUG: ✓ Got access_hash via ResolveUsernameRequest for username: {username} (cached)")
-                except Exception as e:
+            except Exception as e:
                     print(f"DEBUG: ResolveUsernameRequest failed: {e}")
             
-            # If still no target, we cannot send - need access_hash
+            # Strategy 4: Try GetFullUserRequest as last resort
             if not target:
-                await client.disconnect()
-                return False, f'User not accessible: {user.get("user_id")}. Could not resolve user entity (no access_hash). User may not be accessible via API or may have privacy restrictions.'
+                try:
+                    from telethon.tl.functions.users import GetFullUserRequest
+                    from telethon.tl.types import InputPeerUser, InputUser
+                    print(f"DEBUG: Strategy 4: Trying GetFullUserRequest for ID: {user_id_value}")
+                    # Try with InputUser (access_hash=0 might work for some cases)
+                    try:
+                        input_user = InputUser(user_id=user_id_value, access_hash=0)
+                        full_user = await client(GetFullUserRequest(input_user))
+                        if full_user and hasattr(full_user, 'full_user') and hasattr(full_user.full_user, 'id'):
+                            # GetFullUserRequest doesn't return access_hash directly, but we can try to use the user
+                            print(f"DEBUG: GetFullUserRequest succeeded but doesn't provide access_hash")
+                    except Exception as e:
+                        print(f"DEBUG: GetFullUserRequest failed: {e}")
+                except Exception as e:
+                    print(f"DEBUG: GetFullUserRequest exception: {e}")
             
-            # Send message with or without media, using HTML parsing
+            # Strategy 5: Last resort - try direct send with user_id (sometimes works for known users)
+            if not target:
+                print(f"DEBUG: Strategy 5: Trying direct send with user_id as last resort: {user_id_value}")
+                # Try to send directly - sometimes Telethon can resolve it automatically
+                # This is a fallback that might work if user was previously contacted
+                try:
+                    # Test if we can send by trying a minimal operation first
+                    # Actually, let's just try sending - if it fails, we'll catch the error
+                    target = user_id_value
+                    method_used = "direct_user_id_fallback"
+                    print(f"DEBUG: Using direct user_id as fallback (may fail if access_hash required)")
+                except Exception as e:
+                    print(f"DEBUG: Direct user_id fallback setup failed: {e}")
+            
+            # If still no target, we cannot send - need access_hash
+        if not target:
+            await client.disconnect()
+                return False, f'User not accessible: {user.get("user_id")}. Could not resolve user entity (no access_hash). User may not be accessible via API or may have privacy restrictions. Tried: get_entity, GetUsersRequest, ResolveUsernameRequest, GetFullUserRequest.'
+
+        # Send message with or without media, using HTML parsing
             try:
-                if media_path and media_type:
-                    media_file = Path(media_path)
-                    if media_file.exists():
-                        print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+        if media_path and media_type:
+            media_file = Path(media_path)
+            if media_file.exists():
+                print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
                         # Send with media
-                        if media_type == 'photo':
-                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                        elif media_type == 'video':
-                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                        elif media_type == 'audio':
-                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    else:
-                        print(f"DEBUG: Media file not found: {media_path}")
-                        # File doesn't exist, send text only
-                        await client.send_message(target, message_text, parse_mode='html')
-                else:
-                    # Send text only with HTML formatting
-                    await client.send_message(target, message_text, parse_mode='html')
-                
+                if media_type == 'photo':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'video':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'audio':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+            else:
+                print(f"DEBUG: Media file not found: {media_path}")
+                # File doesn't exist, send text only
+                await client.send_message(target, message_text, parse_mode='html')
+        else:
+            # Send text only with HTML formatting
+            await client.send_message(target, message_text, parse_mode='html')
+            
                 # Log successful method
                 print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
-                await client.disconnect()
+        await client.disconnect()
                 return True, None
                 
             except (ValueError, TypeError) as ve:
                 error_str = str(ve)
-                # Check for invalid Peer errors
+                # Check for invalid Peer errors - if we tried direct send, maybe we can still get access_hash
                 if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
-                    print(f"DEBUG: Invalid Peer error, target may be incorrect: {error_str}")
+                    print(f"DEBUG: Invalid Peer error with method {method_used}, trying alternative approaches: {error_str}")
+                    # If we used direct_user_id_fallback, try one more time with GetUsersRequest using different approach
+                    if method_used == "direct_user_id_fallback":
+                        try:
+                            from telethon.tl.functions.users import GetUsersRequest
+                            from telethon.tl.types import InputPeerUser
+                            print(f"DEBUG: Retry: Trying GetUsersRequest with plain int for ID: {user_id_value}")
+                            # Try with plain int (not InputUser)
+                            users_result = await client(GetUsersRequest([user_id_value]))
+                            if users_result and len(users_result) > 0:
+                                user_obj = users_result[0]
+                                if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
+                                    target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                                    method_used = "GetUsersRequest_retry"
+                                    user_entity_cache[cache_key] = target
+                                    print(f"DEBUG: ✓ Got access_hash on retry via GetUsersRequest for ID: {user_id_value}")
+                                    
+                                    # Retry send with proper entity
+                                    if media_path and media_type:
+                                        media_file = Path(media_path)
+                                        if media_file.exists():
+                                            if media_type == 'photo':
+                                                await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                            elif media_type == 'video':
+                                                await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                            elif media_type == 'audio':
+                                                await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                        else:
+                                            await client.send_message(target, message_text, parse_mode='html')
+                                    else:
+                                        await client.send_message(target, message_text, parse_mode='html')
+                                    
+                                    print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
+                                    await client.disconnect()
+        return True, None
+                        except Exception as retry_e:
+                            print(f"DEBUG: Retry GetUsersRequest also failed: {retry_e}")
+                    
                     await client.disconnect()
                     return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
                 # Check for InputUserEmpty or similar errors
@@ -343,7 +437,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         error_str = str(e)
         # Check for invalid Peer errors
         if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
-            await client.disconnect()
+        await client.disconnect()
             return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
         # Check for InputUserEmpty or similar errors
         elif "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
@@ -659,9 +753,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -894,7 +988,7 @@ def new_campaign():
                 account_id = account.get('id')
                     # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
                     
                     # Update account with new ID and campaign_id
                 update_account(account_id, {
@@ -1379,7 +1473,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-                acc['rate_limits'] = stats
+        acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
