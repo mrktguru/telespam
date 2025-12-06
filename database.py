@@ -20,71 +20,100 @@ class Database:
         self.init_db()
 
     def get_connection(self):
-        """Get database connection with proper error handling"""
-        try:
-            # Ensure database directory exists and is writable
-            db_dir = self.db_path.parent
-            if not db_dir.exists():
+        """Get database connection with proper error handling and permission fixing"""
+        import stat
+        import time
+        
+        # Ensure database directory exists and is writable
+        db_dir = self.db_path.parent
+        if not db_dir.exists():
+            try:
                 db_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Ensure database file exists and is writable
-            if self.db_path.exists():
-                # Check if file is writable
-                if not os.access(self.db_path, os.W_OK):
-                    # Try to fix permissions
-                    try:
-                        os.chmod(self.db_path, 0o664)
-                    except Exception as perm_error:
-                        raise PermissionError(f"Database file {self.db_path} is not writable and cannot be fixed. Error: {perm_error}")
-            else:
-                # Create empty database file with proper permissions
-                self.db_path.touch(mode=0o664)
-            
-            # Check directory permissions
+                # Set directory permissions
+                os.chmod(db_dir, 0o755)
+            except Exception as e:
+                raise PermissionError(f"Failed to create database directory {db_dir}: {e}")
+        
+        # Fix directory permissions if needed
+        try:
             if not os.access(db_dir, os.W_OK):
-                raise PermissionError(f"Database directory {db_dir} is not writable")
-            
-            # Use longer timeout and retry logic for database locking
-            max_retries = 3
-            retry_delay = 0.1  # 100ms
-            
-            for attempt in range(max_retries):
+                os.chmod(db_dir, 0o755)
+        except Exception as e:
+            raise PermissionError(f"Database directory {db_dir} is not writable and cannot be fixed: {e}")
+        
+        # Ensure database file exists and is writable
+        if self.db_path.exists():
+            # Check if file is writable
+            if not os.access(self.db_path, os.W_OK):
+                # Try to fix permissions
                 try:
-                    conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
-                    conn.row_factory = sqlite3.Row
-                    # Enable WAL mode for better concurrency
+                    os.chmod(self.db_path, 0o664)
+                except Exception as perm_error:
+                    raise PermissionError(f"Database file {self.db_path} is not writable and cannot be fixed. Error: {perm_error}")
+        else:
+            # Create empty database file with proper permissions
+            try:
+                self.db_path.touch(mode=0o664)
+            except Exception as e:
+                raise PermissionError(f"Failed to create database file {self.db_path}: {e}")
+        
+        # Use longer timeout and retry logic for database locking
+        max_retries = 3
+        retry_delay = 0.1  # 100ms
+        
+        for attempt in range(max_retries):
+            try:
+                conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
+                conn.row_factory = sqlite3.Row
+                # Enable WAL mode for better concurrency
+                try:
+                    conn.execute('PRAGMA journal_mode=WAL')
+                except sqlite3.OperationalError:
+                    # If WAL fails, try DELETE mode
+                    conn.execute('PRAGMA journal_mode=DELETE')
+                # Set busy timeout to handle concurrent access
+                conn.execute('PRAGMA busy_timeout = 30000')  # 30 seconds
+                return conn
+            except sqlite3.OperationalError as e:
+                error_str = str(e).lower()
+                if "database is locked" in error_str and attempt < max_retries - 1:
+                    # Wait before retry with exponential backoff
+                    time.sleep(retry_delay * (2 ** attempt))
+                    continue
+                elif "readonly" in error_str or "read-only" in error_str:
+                    # Try to fix permissions and retry
                     try:
-                        conn.execute('PRAGMA journal_mode=WAL')
-                    except sqlite3.OperationalError:
-                        # If WAL fails, try DELETE mode
-                        conn.execute('PRAGMA journal_mode=DELETE')
-                    # Set busy timeout to handle concurrent access
-                    conn.execute('PRAGMA busy_timeout = 30000')  # 30 seconds
-                    return conn
-                except sqlite3.OperationalError as e:
-                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                        # Wait before retry
-                        import time
-                        time.sleep(retry_delay * (attempt + 1))
-                        continue
-                    else:
-                        raise
-        except sqlite3.OperationalError as e:
-            if "database is locked" in str(e).lower():
-                raise Exception(f"Database is locked. Please close other processes using the database. Error: {e}")
-            elif "readonly" in str(e).lower():
-                # Try to fix permissions and retry
-                try:
-                    if self.db_path.exists():
-                        os.chmod(self.db_path, 0o664)
-                    # Retry connection
-                    conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
-                    conn.row_factory = sqlite3.Row
-                    return conn
-                except Exception as retry_error:
-                    raise Exception(f"Database is read-only. Check file permissions: {self.db_path}. Tried to fix but failed: {retry_error}")
-            else:
-                raise
+                        # Fix file permissions
+                        if self.db_path.exists():
+                            os.chmod(self.db_path, 0o664)
+                        # Fix directory permissions
+                        os.chmod(db_dir, 0o755)
+                        # Retry connection
+                        time.sleep(0.1)  # Small delay before retry
+                        conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
+                        conn.row_factory = sqlite3.Row
+                        conn.execute('PRAGMA busy_timeout = 30000')
+                        return conn
+                    except Exception as retry_error:
+                        # Get current permissions for debugging
+                        try:
+                            file_stat = os.stat(self.db_path)
+                            dir_stat = os.stat(db_dir)
+                            file_perms = oct(file_stat.st_mode)[-3:]
+                            dir_perms = oct(dir_stat.st_mode)[-3:]
+                            raise Exception(
+                                f"Database is read-only. File: {self.db_path} (perms: {file_perms}), "
+                                f"Directory: {db_dir} (perms: {dir_perms}). "
+                                f"Tried to fix but failed: {retry_error}. "
+                                f"Please run: chmod 664 {self.db_path} && chmod 755 {db_dir}"
+                            )
+                        except:
+                            raise Exception(
+                                f"Database is read-only. Check file permissions: {self.db_path}. "
+                                f"Tried to fix but failed: {retry_error}"
+                            )
+                else:
+                    raise
 
     def init_db(self):
         """Initialize database tables"""
