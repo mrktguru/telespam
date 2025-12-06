@@ -151,6 +151,8 @@ class Database:
                 notes TEXT,
                 photo_count INTEGER DEFAULT 0,
                 rate_limits TEXT,
+                api_id TEXT,
+                api_hash TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -1311,8 +1313,9 @@ class Database:
                     id, phone, username, first_name, last_name, bio, session_file,
                     status, daily_sent, total_sent, cooldown_until, last_used_at,
                     added_at, flood_count, use_proxy, proxy, proxy_type, proxy_host,
-                    proxy_port, proxy_user, proxy_pass, campaign_id, notes, photo_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    proxy_port, proxy_user, proxy_pass, campaign_id, notes, photo_count,
+                    api_id, api_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 account.get('id'),
                 account.get('phone'),
@@ -1337,7 +1340,9 @@ class Database:
                 account.get('proxy_pass'),
                 account.get('campaign_id'),
                 account.get('notes'),
-                account.get('photo_count', 0)
+                account.get('photo_count', 0),
+                str(account.get('api_id')) if account.get('api_id') else None,
+                account.get('api_hash')
             ))
             conn.commit()
             return True
