@@ -292,6 +292,18 @@ async def add_account(account_data: Dict) -> Dict:
         # Generate account ID
         account_id = generate_account_id()
 
+        # CRITICAL: Always use API credentials from config, not from account_data
+        # All accounts must use the same API credentials for consistency
+        # This ensures all accounts can send messages to unknown users
+        api_id_to_store = config.API_ID
+        api_hash_to_store = config.API_HASH
+        
+        # Log if different credentials were provided (for debugging)
+        if account_data.get('api_id') and account_data.get('api_id') != config.API_ID:
+            print(f"DEBUG: WARNING: account_data provided different api_id ({account_data.get('api_id')}), using config.API_ID ({config.API_ID})")
+        if account_data.get('api_hash') and account_data.get('api_hash') != config.API_HASH:
+            print(f"DEBUG: WARNING: account_data provided different api_hash, using config.API_HASH")
+        
         # Prepare account record
         account = {
             "id": account_id,
@@ -302,8 +314,8 @@ async def add_account(account_data: Dict) -> Dict:
             "session_file": account_data.get('session_file'),
             "status": account_data.get('status', config.AccountStatus.WARMING),
             "notes": account_data.get('notes', ''),
-            "api_id": account_data.get('api_id'),  # Store API credentials
-            "api_hash": account_data.get('api_hash'),  # Store API credentials
+            "api_id": api_id_to_store,  # CRITICAL: Always use config values
+            "api_hash": api_hash_to_store,  # CRITICAL: Always use config values
             "use_proxy": False,
             "proxy_type": "",
             "proxy_host": "",
