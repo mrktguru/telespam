@@ -50,6 +50,20 @@ class Database:
                     os.chmod(self.db_path, 0o664)
                 except Exception as perm_error:
                     raise PermissionError(f"Database file {self.db_path} is not writable and cannot be fixed. Error: {perm_error}")
+            
+            # Fix WAL and SHM file permissions if they exist (SQLite WAL mode)
+            wal_path = Path(str(self.db_path) + '-wal')
+            shm_path = Path(str(self.db_path) + '-shm')
+            if wal_path.exists() and not os.access(wal_path, os.W_OK):
+                try:
+                    os.chmod(wal_path, 0o664)
+                except Exception:
+                    pass  # Non-critical, continue
+            if shm_path.exists() and not os.access(shm_path, os.W_OK):
+                try:
+                    os.chmod(shm_path, 0o664)
+                except Exception:
+                    pass  # Non-critical, continue
         else:
             # Create empty database file with proper permissions
             try:
@@ -86,6 +100,19 @@ class Database:
                         # Fix file permissions
                         if self.db_path.exists():
                             os.chmod(self.db_path, 0o664)
+                        # Fix WAL and SHM files if they exist
+                        wal_path = Path(str(self.db_path) + '-wal')
+                        shm_path = Path(str(self.db_path) + '-shm')
+                        if wal_path.exists():
+                            try:
+                                os.chmod(wal_path, 0o664)
+                            except Exception:
+                                pass
+                        if shm_path.exists():
+                            try:
+                                os.chmod(shm_path, 0o664)
+                            except Exception:
+                                pass
                         # Fix directory permissions
                         os.chmod(db_dir, 0o755)
                         # Retry connection
@@ -101,11 +128,21 @@ class Database:
                             dir_stat = os.stat(db_dir)
                             file_perms = oct(file_stat.st_mode)[-3:]
                             dir_perms = oct(dir_stat.st_mode)[-3:]
+                            wal_info = ""
+                            shm_info = ""
+                            if wal_path.exists():
+                                wal_stat = os.stat(wal_path)
+                                wal_perms = oct(wal_stat.st_mode)[-3:]
+                                wal_info = f", WAL: {wal_path} (perms: {wal_perms})"
+                            if shm_path.exists():
+                                shm_stat = os.stat(shm_path)
+                                shm_perms = oct(shm_stat.st_mode)[-3:]
+                                shm_info = f", SHM: {shm_path} (perms: {shm_perms})"
                             raise Exception(
                                 f"Database is read-only. File: {self.db_path} (perms: {file_perms}), "
-                                f"Directory: {db_dir} (perms: {dir_perms}). "
+                                f"Directory: {db_dir} (perms: {dir_perms}){wal_info}{shm_info}. "
                                 f"Tried to fix but failed: {retry_error}. "
-                                f"Please run: chmod 664 {self.db_path} && chmod 755 {db_dir}"
+                                f"Please run: chmod 664 {self.db_path}* && chmod 755 {db_dir}"
                             )
                         except:
                             raise Exception(
@@ -1416,6 +1453,77 @@ class Database:
             ))
             conn.commit()
             return True
+        except sqlite3.OperationalError as e:
+            conn.rollback()
+            error_str = str(e).lower()
+            if "readonly" in error_str or "read-only" in error_str:
+                # Try to fix permissions and retry
+                try:
+                    # Fix file permissions
+                    if self.db_path.exists():
+                        os.chmod(self.db_path, 0o664)
+                    # Fix WAL and SHM files
+                    wal_path = Path(str(self.db_path) + '-wal')
+                    shm_path = Path(str(self.db_path) + '-shm')
+                    if wal_path.exists():
+                        os.chmod(wal_path, 0o664)
+                    if shm_path.exists():
+                        os.chmod(shm_path, 0o664)
+                    # Fix directory
+                    os.chmod(self.db_path.parent, 0o755)
+                    # Retry
+                    conn.close()
+                    conn = self.get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO accounts (
+                            id, phone, username, first_name, last_name, bio, session_file,
+                            status, daily_sent, total_sent, cooldown_until, last_used_at,
+                            added_at, flood_count, use_proxy, proxy, proxy_type, proxy_host,
+                            proxy_port, proxy_user, proxy_pass, campaign_id, notes, photo_count,
+                            api_id, api_hash
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        account.get('id'),
+                        account.get('phone'),
+                        account.get('username'),
+                        account.get('first_name'),
+                        account.get('last_name'),
+                        account.get('bio'),
+                        account.get('session_file'),
+                        account.get('status', 'checking'),
+                        account.get('daily_sent', 0),
+                        account.get('total_sent', 0),
+                        account.get('cooldown_until'),
+                        account.get('last_used_at'),
+                        account.get('added_at'),
+                        account.get('flood_count', 0),
+                        1 if account.get('use_proxy') else 0,
+                        account.get('proxy'),
+                        account.get('proxy_type'),
+                        account.get('proxy_host'),
+                        account.get('proxy_port'),
+                        account.get('proxy_user'),
+                        account.get('proxy_pass'),
+                        account.get('campaign_id'),
+                        account.get('notes'),
+                        account.get('photo_count', 0),
+                        str(account.get('api_id')) if account.get('api_id') else None,
+                        account.get('api_hash')
+                    ))
+                    conn.commit()
+                    conn.close()
+                    return True
+                except Exception as retry_error:
+                    print(f"Error adding account (readonly, retry failed): {retry_error}")
+                    import traceback
+                    traceback.print_exc()
+                    return False
+            else:
+                print(f"Error adding account: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
         except Exception as e:
             conn.rollback()
             print(f"Error adding account: {e}")
