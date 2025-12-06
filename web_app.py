@@ -289,8 +289,41 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                     # Try with plain int first (most common case)
                     try:
                         users_result = await client(GetUsersRequest([user_id_value]))
+                        
+                        # DETAILED LOGGING: Check what GetUsersRequest returned
+                        if users_result and len(users_result) > 0:
+                            user_obj = users_result[0]
+                            print(f"DEBUG: ===== GetUsersRequest RESULT DETAILS =====")
+                            print(f"DEBUG: GetUsersRequest returned {len(users_result)} user(s)")
+                            print(f"DEBUG: First user object:")
+                            print(f"  - user.id: {getattr(user_obj, 'id', 'N/A')}")
+                            print(f"  - user.min: {getattr(user_obj, 'min', 'N/A')}  # ← IMPORTANT: min field")
+                            print(f"  - user.access_hash: {getattr(user_obj, 'access_hash', 'N/A')}")
+                            print(f"  - user.deleted: {getattr(user_obj, 'deleted', False)}")
+                            print(f"  - user.restricted: {getattr(user_obj, 'restricted', False)}")
+                            print(f"  - user.scam: {getattr(user_obj, 'scam', False)}")
+                            print(f"  - user.fake: {getattr(user_obj, 'fake', False)}")
+                            print(f"  - user.bot: {getattr(user_obj, 'bot', False)}")
+                            print(f"  - user.verified: {getattr(user_obj, 'verified', False)}")
+                            print(f"  - user.username: {getattr(user_obj, 'username', 'N/A')}")
+                            print(f"  - user.first_name: {getattr(user_obj, 'first_name', 'N/A')}")
+                            print(f"  - user.last_name: {getattr(user_obj, 'last_name', 'N/A')}")
+                            print(f"  - user.phone: {getattr(user_obj, 'phone', 'N/A')}")
+                            print(f"  - user.class_name: {user_obj.__class__.__name__}")
+                            print(f"  - All attributes: {[attr for attr in dir(user_obj) if not attr.startswith('_')]}")
+                            print(f"DEBUG: ===== END GetUsersRequest RESULT =====")
+                            
+                            # Check if user is deleted or empty
+                            if hasattr(user_obj, 'min') and user_obj.min:
+                                print(f"DEBUG: ⚠ WARNING: user.min is True - user may be deleted or empty!")
+                            
+                            if hasattr(user_obj, 'deleted') and user_obj.deleted:
+                                print(f"DEBUG: ⚠ WARNING: user.deleted is True - user account is deleted!")
+                            
                     except Exception as e1:
                         print(f"DEBUG: GetUsersRequest with int failed: {e1}, trying alternative...")
+                        import traceback
+                        print(f"DEBUG: GetUsersRequest traceback: {traceback.format_exc()}")
                         # Try alternative: get_input_entity first, then use it
                         try:
                             # CRITICAL: Ensure user_id_value is int for get_input_entity
@@ -310,7 +343,28 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                     
                     if not target and users_result and len(users_result) > 0:
                         user_obj = users_result[0]
-                        print(f"DEBUG: GetUsersRequest returned user: id={user_obj.id}, type={type(user_obj)}, has_access_hash={hasattr(user_obj, 'access_hash')}, access_hash={getattr(user_obj, 'access_hash', None)}")
+                        
+                        # Check if user is valid (not deleted, not empty)
+                        is_deleted = getattr(user_obj, 'deleted', False)
+                        is_min = getattr(user_obj, 'min', False)
+                        
+                        if is_deleted or is_min:
+                            print(f"DEBUG: ⚠ User is deleted or empty (deleted={is_deleted}, min={is_min}), cannot send message")
+                            # Still try to get access_hash if available
+                        
+                        print(f"DEBUG: Processing GetUsersRequest result: id={user_obj.id}, has_access_hash={hasattr(user_obj, 'access_hash')}, access_hash={getattr(user_obj, 'access_hash', None)}")
+                        
+                        # Check if user is deleted or empty (min=True)
+                        if is_deleted:
+                            print(f"DEBUG: ❌ User account is deleted, cannot send message")
+                            await client.disconnect()
+                            return False, f'User account is deleted (user_id: {user_id_value})'
+                        
+                        if is_min:
+                            print(f"DEBUG: ❌ User is empty (min=True), cannot send message")
+                            await client.disconnect()
+                            return False, f'User is empty or not accessible (user_id: {user_id_value}, min=True)'
+                        
                         if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
                             target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
                             method_used = "GetUsersRequest"
@@ -322,6 +376,12 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             # Check if it's a UserEmpty or similar
                             if hasattr(user_obj, '__class__'):
                                 print(f"DEBUG: User object class: {user_obj.__class__.__name__}")
+                            
+                            # If user exists but no access_hash, it might still be sendable
+                            # Try to use the user_id directly
+                            if hasattr(user_obj, 'id') and user_obj.id:
+                                print(f"DEBUG: User exists (id={user_obj.id}) but no access_hash, will try direct send")
+                                # Don't set target here, let it fall through to other strategies
                     elif not target:
                         print(f"DEBUG: GetUsersRequest returned empty result or failed")
                 except Exception as e:
