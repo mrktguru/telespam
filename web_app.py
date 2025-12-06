@@ -1622,18 +1622,21 @@ def add_account_tdata():
                 with open(filepath, 'r') as f:
                     creds = json.load(f)
                 
+                # Support multiple JSON formats:
+                # Standard: api_id, api_hash
+                # TelegramExpert.pro: app_id, app_hash
                 phone = creds.get('phone')
-                api_id_str = creds.get('api_id')
-                api_hash = creds.get('api_hash')
-                password = creds.get('password')
+                api_id_str = creds.get('api_id') or creds.get('app_id')  # Support both formats
+                api_hash = creds.get('api_hash') or creds.get('app_hash')  # Support both formats
+                password = creds.get('password') or creds.get('twoFA')  # Support both password fields
                 
                 # Validate required fields
                 if not phone:
-                    return {'success': False, 'error': 'Phone number is required in JSON file'}
+                    return {'success': False, 'error': 'Phone number is required in JSON file (field: phone)'}
                 if not api_id_str:
-                    return {'success': False, 'error': 'API ID is required in JSON file'}
+                    return {'success': False, 'error': 'API ID is required in JSON file (field: api_id or app_id)'}
                 if not api_hash:
-                    return {'success': False, 'error': 'API Hash is required in JSON file'}
+                    return {'success': False, 'error': 'API Hash is required in JSON file (field: api_hash or app_hash)'}
                 
                 try:
                     api_id = int(api_id_str)
