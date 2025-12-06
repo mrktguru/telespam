@@ -133,16 +133,40 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             print(f"DEBUG: Using account proxy {proxy_id} for account {phone}")
 
     # Use account-specific API credentials if available, otherwise use config
-    # This is important because sessions created with different API credentials won't work
-    account_api_id = account.get('api_id') or config.API_ID
-    account_api_hash = account.get('api_hash') or config.API_HASH
+    # CRITICAL: Sessions are bound to the API credentials they were created with
+    # If a session was created with different API ID/HASH, it won't work properly
+    account_api_id = account.get('api_id')
+    account_api_hash = account.get('api_hash')
     
     # Convert to int if string
-    if isinstance(account_api_id, str):
-        try:
-            account_api_id = int(account_api_id)
-        except (ValueError, TypeError):
-            account_api_id = config.API_ID
+    if account_api_id:
+        if isinstance(account_api_id, str):
+            try:
+                account_api_id = int(account_api_id)
+            except (ValueError, TypeError):
+                account_api_id = None
+    
+    # Fallback to config if account doesn't have API credentials
+    if not account_api_id:
+        account_api_id = config.API_ID
+        print(f"DEBUG: Account {phone} has no api_id, using config.API_ID: {account_api_id}")
+    else:
+        print(f"DEBUG: Using account-specific api_id for {phone}: {account_api_id}")
+    
+    if not account_api_hash:
+        account_api_hash = config.API_HASH
+        print(f"DEBUG: Account {phone} has no api_hash, using config.API_HASH")
+    else:
+        print(f"DEBUG: Using account-specific api_hash for {phone}: {account_api_hash[:10]}...")
+    
+    # Log which credentials are being used
+    config_api_id = config.API_ID
+    config_api_hash = config.API_HASH
+    if account_api_id != config_api_id or account_api_hash != config_api_hash:
+        print(f"WARNING: Account {phone} uses different API credentials than config!")
+        print(f"  Account: api_id={account_api_id}, api_hash={account_api_hash[:10]}...")
+        print(f"  Config: api_id={config_api_id}, api_hash={config_api_hash[:10]}...")
+        print(f"  This is OK if the session was created with these credentials")
     
     client = TelegramClient(
         str(session_file),
@@ -1685,6 +1709,11 @@ def add_account_tdata():
                         if existing_phone == phone_normalized_check:
                             return {'success': False, 'error': f'Account with phone {phone_from_me} already exists (ID: {existing.get("id")})'}
                     
+                    # CRITICAL: Store the API credentials that were used to create the session
+                    # The session file is bound to these specific API credentials
+                    # Using different credentials will cause "Could not find the input entity" errors
+                    print(f"DEBUG: Storing API credentials for JSON account: api_id={api_id}, api_hash={api_hash[:10]}...")
+                    
                     account_data = {
                         'phone': me.phone,
                         'username': me.username or '',
@@ -1693,8 +1722,8 @@ def add_account_tdata():
                         'session_file': str(session_file),
                         'status': 'active',
                         'notes': notes or 'Web added from JSON',
-                        'api_id': api_id,  # Store API credentials
-                        'api_hash': api_hash  # Store API credentials
+                        'api_id': api_id,  # CRITICAL: Store API credentials used to create session
+                        'api_hash': api_hash  # CRITICAL: Store API credentials used to create session
                     }
                     
                     add_result = await add_account(account_data)
