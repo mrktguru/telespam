@@ -1598,12 +1598,24 @@ def add_account_tdata():
         
         # Save uploaded file
         upload_dir = Path(__file__).parent / 'uploads' / 'accounts'
-        upload_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            # Ensure directory is writable
+            if not os.access(upload_dir, os.W_OK):
+                os.chmod(upload_dir, 0o755)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Failed to create upload directory: {str(e)}'}), 500
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"{timestamp}_{file.filename}"
         filepath = upload_dir / filename
-        file.save(str(filepath))
+        
+        try:
+            file.save(str(filepath))
+            # Ensure file is readable
+            os.chmod(filepath, 0o644)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Failed to save uploaded file: {str(e)}'}), 500
         
         # Import converter functions
         from converter import detect_and_process

@@ -44,15 +44,31 @@ class Database:
             if not os.access(db_dir, os.W_OK):
                 raise PermissionError(f"Database directory {db_dir} is not writable")
             
-            conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            # Enable WAL mode for better concurrency
-            try:
-                conn.execute('PRAGMA journal_mode=WAL')
-            except sqlite3.OperationalError:
-                # If WAL fails, try DELETE mode
-                conn.execute('PRAGMA journal_mode=DELETE')
-            return conn
+            # Use longer timeout and retry logic for database locking
+            max_retries = 3
+            retry_delay = 0.1  # 100ms
+            
+            for attempt in range(max_retries):
+                try:
+                    conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
+                    conn.row_factory = sqlite3.Row
+                    # Enable WAL mode for better concurrency
+                    try:
+                        conn.execute('PRAGMA journal_mode=WAL')
+                    except sqlite3.OperationalError:
+                        # If WAL fails, try DELETE mode
+                        conn.execute('PRAGMA journal_mode=DELETE')
+                    # Set busy timeout to handle concurrent access
+                    conn.execute('PRAGMA busy_timeout = 30000')  # 30 seconds
+                    return conn
+                except sqlite3.OperationalError as e:
+                    if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                        # Wait before retry
+                        import time
+                        time.sleep(retry_delay * (attempt + 1))
+                        continue
+                    else:
+                        raise
         except sqlite3.OperationalError as e:
             if "database is locked" in str(e).lower():
                 raise Exception(f"Database is locked. Please close other processes using the database. Error: {e}")
