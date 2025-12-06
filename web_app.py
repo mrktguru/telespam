@@ -232,12 +232,52 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 except Exception as e:
                     print(f"DEBUG: get_entity failed: {e}")
             
-            # Strategy 2: Try direct send first (most reliable for known users)
-            # If target not found, use user_id directly
+            # Strategy 2: Try GetUsersRequest to get access_hash BEFORE sending
+            # This is more reliable than direct send without access_hash
             if not target:
-                target = user_id_value
-                method_used = "direct_user_id"
-                print(f"DEBUG: Strategy: Trying direct send to user_id: {user_id_value}")
+                try:
+                    from telethon.tl.functions.users import GetUsersRequest
+                    from telethon.tl.types import InputPeerUser
+                    print(f"DEBUG: Strategy 2: Trying GetUsersRequest for ID: {user_id_value}")
+                    users_result = await client(GetUsersRequest([user_id_value]))
+                    if users_result and len(users_result) > 0:
+                        user_obj = users_result[0]
+                        if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
+                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                            method_used = "GetUsersRequest"
+                            # Cache successful resolution
+                            user_entity_cache[cache_key] = target
+                            print(f"DEBUG: ✓ Got access_hash via GetUsersRequest for ID: {user_id_value} (cached)")
+                        else:
+                            print(f"DEBUG: GetUsersRequest returned user but no access_hash")
+                except Exception as e:
+                    print(f"DEBUG: GetUsersRequest failed: {e}")
+            
+            # Strategy 3: Try ResolveUsernameRequest if username is available
+            if not target and user.get('username'):
+                try:
+                    from telethon.tl.functions.contacts import ResolveUsernameRequest
+                    from telethon.tl.types import InputPeerUser
+                    username = user.get('username').strip().lstrip('@')
+                    print(f"DEBUG: Strategy 3: Trying ResolveUsernameRequest for username: {username}")
+                    resolved = await client(ResolveUsernameRequest(username))
+                    if resolved and hasattr(resolved, 'users') and len(resolved.users) > 0:
+                        user_obj = resolved.users[0]
+                        if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
+                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                            method_used = "ResolveUsernameRequest"
+                            # Cache successful resolution by both ID and username
+                            user_entity_cache[cache_key] = target
+                            if username:
+                                user_entity_cache[f"username:{username}"] = target
+                            print(f"DEBUG: ✓ Got access_hash via ResolveUsernameRequest for username: {username} (cached)")
+                except Exception as e:
+                    print(f"DEBUG: ResolveUsernameRequest failed: {e}")
+            
+            # If still no target, we cannot send - need access_hash
+            if not target:
+                await client.disconnect()
+                return False, f'User not accessible: {user.get("user_id")}. Could not resolve user entity (no access_hash). User may not be accessible via API or may have privacy restrictions.'
             
             # Send message with or without media, using HTML parsing
             try:
@@ -265,49 +305,20 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 await client.disconnect()
                 return True, None
                 
-            except ValueError as ve:
+            except (ValueError, TypeError) as ve:
                 error_str = str(ve)
+                # Check for invalid Peer errors
+                if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
+                    print(f"DEBUG: Invalid Peer error, target may be incorrect: {error_str}")
+                    await client.disconnect()
+                    return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
                 # Check for InputUserEmpty or similar errors
-                if "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
-                    print(f"DEBUG: Direct send failed with entity error, trying GetUsersRequest: {error_str}")
-                    # Strategy 3: Try GetUsersRequest as fallback
-                    try:
-                        from telethon.tl.functions.users import GetUsersRequest
-                        from telethon.tl.types import InputPeerUser
-                        print(f"DEBUG: Strategy 3: Trying GetUsersRequest for ID: {user_id_value}")
-                        users_result = await client(GetUsersRequest([user_id_value]))
-                        if users_result and len(users_result) > 0:
-                            user_obj = users_result[0]
-                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                            method_used = "GetUsersRequest_after_error"
-                            # Cache successful resolution
-                            user_entity_cache[cache_key] = target
-                            print(f"DEBUG: ✓ Got access_hash via GetUsersRequest after error for ID: {user_id_value} (cached)")
-                            
-                            # Retry send with proper entity
-                            if media_path and media_type:
-                                media_file = Path(media_path)
-                                if media_file.exists():
-                                    if media_type == 'photo':
-                                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                                    elif media_type == 'video':
-                                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                                    elif media_type == 'audio':
-                                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                                else:
-                                    await client.send_message(target, message_text, parse_mode='html')
-                            else:
-                                await client.send_message(target, message_text, parse_mode='html')
-                            
-                            print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
-                            await client.disconnect()
-                            return True, None
-                    except Exception as e2:
-                        print(f"DEBUG: GetUsersRequest after error also failed: {e2}")
-                        await client.disconnect()
-                        return False, f'User not accessible: {user.get("user_id")}. Could not resolve user entity. Error: {error_str}'
+                elif "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
+                    print(f"DEBUG: Entity error: {error_str}")
+                    await client.disconnect()
+                    return False, f'User not accessible: {user.get("user_id")}. Could not find the input entity. User may not be accessible via API or may have privacy restrictions. Error: {error_str}'
                 else:
-                    # Other ValueError, re-raise
+                    # Other ValueError/TypeError, re-raise
                     raise
             
             await client.disconnect()
@@ -330,10 +341,14 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         return False, 'Peer flood - account limited'
     except Exception as e:
         error_str = str(e)
+        # Check for invalid Peer errors
+        if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
+            await client.disconnect()
+            return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
         # Check for InputUserEmpty or similar errors
-        if "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
-                await client.disconnect()
-                return False, f'User not accessible: {user.get("user_id")}. Could not find user entity. User may not be accessible via API or may have privacy restrictions.'
+        elif "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
+            await client.disconnect()
+            return False, f'User not accessible: {user.get("user_id")}. Could not find user entity. User may not be accessible via API or may have privacy restrictions.'
         await client.disconnect()
         return False, f'Error sending to user {user.get("user_id")}: {error_str}'
 
