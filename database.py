@@ -1606,13 +1606,28 @@ class Database:
                     conn = self.get_connection()
                     cursor = conn.cursor()
                     
-                    # Check for duplicate again before retry
+                    # Check for duplicate again before retry (normalize phone for comparison)
                     phone = account.get('phone')
                     if phone:
-                        cursor.execute('SELECT id FROM accounts WHERE phone = ?', (phone,))
+                        # Normalize phone for comparison
+                        phone_normalized = phone.replace('+', '').replace(' ', '').replace('-', '').strip()
+                        
+                        # Check for exact match first
+                        cursor.execute('SELECT id, phone FROM accounts WHERE phone = ?', (phone,))
                         existing = cursor.fetchone()
+                        
+                        # Also check normalized phones
+                        if not existing:
+                            all_accounts = cursor.execute('SELECT id, phone FROM accounts').fetchall()
+                            for acc in all_accounts:
+                                existing_phone = acc['phone'] or ''
+                                existing_normalized = existing_phone.replace('+', '').replace(' ', '').replace('-', '').strip()
+                                if existing_normalized == phone_normalized:
+                                    existing = acc
+                                    break
+                        
                         if existing:
-                            print(f"WARNING: Account with phone {phone} already exists (ID: {existing['id']}), skipping duplicate")
+                            print(f"WARNING: Account with phone {phone} (normalized: {phone_normalized}) already exists (ID: {existing['id']}), skipping duplicate")
                             conn.close()
                             return False
                     
