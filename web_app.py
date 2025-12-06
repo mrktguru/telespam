@@ -620,9 +620,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-        # Mark as completed
+            # Mark as completed
             db.update_campaign(campaign_id, status='completed')
-        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')

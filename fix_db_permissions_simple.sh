@@ -64,31 +64,92 @@ if [ -f "${DB_PATH}-shm" ]; then
     }
 fi
 
-# Если запущено от root или с sudo, также исправляем владельца
-if [ "$EUID" -eq 0 ] || [ -n "$SUDO_USER" ]; then
-    # Определяем пользователя gunicorn или текущего пользователя
-    GUNICORN_USER=$(systemctl show -p User telespam-web.service 2>/dev/null | cut -d= -f2 || echo "")
-    
-    if [ -z "$GUNICORN_USER" ]; then
-        GUNICORN_USER=$(ps aux | grep -E 'gunicorn|flask' | grep -v grep | head -1 | awk '{print $1}' || echo "")
+# Определяем реального пользователя веб-сервера
+echo "🔍 Определяю пользователя веб-сервера..."
+GUNICORN_USER=""
+
+# Метод 1: Из systemd service
+if [ -z "$GUNICORN_USER" ]; then
+    SYSTEMD_USER=$(systemctl show -p User telespam-web.service 2>/dev/null | cut -d= -f2 || echo "")
+    if [ -n "$SYSTEMD_USER" ] && [ "$SYSTEMD_USER" != "" ]; then
+        GUNICORN_USER="$SYSTEMD_USER"
+        echo "   ✓ Найден в systemd service: $GUNICORN_USER"
     fi
-    
-    if [ -z "$GUNICORN_USER" ] && [ -n "$SUDO_USER" ]; then
+fi
+
+# Метод 2: Из запущенного процесса gunicorn
+if [ -z "$GUNICORN_USER" ]; then
+    RUNNING_USER=$(ps aux | grep -E '[g]unicorn.*web_app:app' | head -1 | awk '{print $1}' || echo "")
+    if [ -n "$RUNNING_USER" ] && [ "$RUNNING_USER" != "" ]; then
+        GUNICORN_USER="$RUNNING_USER"
+        echo "   ✓ Найден в запущенном процессе: $GUNICORN_USER"
+    fi
+fi
+
+# Метод 3: Из любого процесса gunicorn
+if [ -z "$GUNICORN_USER" ]; then
+    ANY_GUNICORN=$(ps aux | grep -E '[g]unicorn' | head -1 | awk '{print $1}' || echo "")
+    if [ -n "$ANY_GUNICORN" ] && [ "$ANY_GUNICORN" != "" ]; then
+        GUNICORN_USER="$ANY_GUNICORN"
+        echo "   ✓ Найден в процессе gunicorn: $GUNICORN_USER"
+    fi
+fi
+
+# Метод 4: Fallback - текущий пользователь (если запущено с sudo)
+if [ -z "$GUNICORN_USER" ]; then
+    if [ -n "$SUDO_USER" ]; then
         GUNICORN_USER="$SUDO_USER"
+        echo "   ⚠ Использую SUDO_USER: $GUNICORN_USER"
+    else
+        GUNICORN_USER=$(whoami)
+        echo "   ⚠ Использую текущего пользователя: $GUNICORN_USER"
     fi
-    
+fi
+
+echo "   👤 Финальный пользователь: $GUNICORN_USER"
+echo ""
+
+# Если запущено от root или с sudo, исправляем владельца
+if [ "$EUID" -eq 0 ] || [ -n "$SUDO_USER" ]; then
     if [ -n "$GUNICORN_USER" ]; then
-        echo "👤 Устанавливаю владельца: $GUNICORN_USER"
-        chown "$GUNICORN_USER:$GUNICORN_USER" "$DB_PATH" 2>/dev/null || echo "⚠️  Не удалось изменить владельца"
-        chown "$GUNICORN_USER:$GUNICORN_USER" "$DB_DIR" 2>/dev/null || echo "⚠️  Не удалось изменить владельца директории"
-        # Также устанавливаем владельца для WAL и SHM файлов
+        echo "🔧 Устанавливаю владельца файлов: $GUNICORN_USER"
+        
+        # Устанавливаем владельца для базы данных
+        if chown "$GUNICORN_USER:$GUNICORN_USER" "$DB_PATH" 2>/dev/null; then
+            echo "   ✓ Владелец базы данных установлен"
+        else
+            echo "   ✗ Не удалось установить владельца базы данных"
+        fi
+        
+        # Устанавливаем владельца для директории
+        if chown "$GUNICORN_USER:$GUNICORN_USER" "$DB_DIR" 2>/dev/null; then
+            echo "   ✓ Владелец директории установлен"
+        else
+            echo "   ⚠ Не удалось установить владельца директории"
+        fi
+        
+        # Устанавливаем владельца для WAL и SHM файлов
         if [ -f "${DB_PATH}-wal" ]; then
-            chown "$GUNICORN_USER:$GUNICORN_USER" "${DB_PATH}-wal" 2>/dev/null || echo "⚠️  Не удалось изменить владельца WAL файла"
+            if chown "$GUNICORN_USER:$GUNICORN_USER" "${DB_PATH}-wal" 2>/dev/null; then
+                echo "   ✓ Владелец WAL файла установлен"
+            else
+                echo "   ⚠ Не удалось установить владельца WAL файла"
+            fi
         fi
+        
         if [ -f "${DB_PATH}-shm" ]; then
-            chown "$GUNICORN_USER:$GUNICORN_USER" "${DB_PATH}-shm" 2>/dev/null || echo "⚠️  Не удалось изменить владельца SHM файла"
+            if chown "$GUNICORN_USER:$GUNICORN_USER" "${DB_PATH}-shm" 2>/dev/null; then
+                echo "   ✓ Владелец SHM файла установлен"
+            else
+                echo "   ⚠ Не удалось установить владельца SHM файла"
+            fi
         fi
+    else
+        echo "⚠️  Не удалось определить пользователя веб-сервера"
     fi
+else
+    echo "ℹ️  Скрипт запущен не от root, пропускаю установку владельца"
+    echo "   Для установки владельца запустите: sudo bash $0"
 fi
 
 # Проверяем результат
@@ -104,11 +165,36 @@ fi
 echo ""
 
 # Проверяем доступность
+echo ""
+echo "🔍 Проверяю доступность базы данных..."
 if [ -r "$DB_PATH" ] && [ -w "$DB_PATH" ]; then
     echo "✅ База данных доступна для чтения и записи"
 else
     echo "⚠️  База данных может быть недоступна для записи"
     echo "   Попробуйте запустить с sudo: sudo bash $0"
+fi
+
+# Дополнительная диагностика
+echo ""
+echo "📊 Диагностика:"
+echo "   Путь к БД: $DB_PATH"
+echo "   Владелец БД: $(stat -c '%U:%G' "$DB_PATH" 2>/dev/null || stat -f '%Su:%Sg' "$DB_PATH" 2>/dev/null || echo 'неизвестно')"
+echo "   Права БД: $(stat -c '%a' "$DB_PATH" 2>/dev/null || stat -f '%A' "$DB_PATH" 2>/dev/null || echo 'неизвестно')"
+echo "   Владелец директории: $(stat -c '%U:%G' "$DB_DIR" 2>/dev/null || stat -f '%Su:%Sg' "$DB_DIR" 2>/dev/null || echo 'неизвестно')"
+echo "   Права директории: $(stat -c '%a' "$DB_DIR" 2>/dev/null || stat -f '%A' "$DB_DIR" 2>/dev/null || echo 'неизвестно')"
+
+# Проверяем, может ли пользователь веб-сервера писать
+if [ -n "$GUNICORN_USER" ]; then
+    echo "   Пользователь веб-сервера: $GUNICORN_USER"
+    # Проверяем, может ли этот пользователь писать (если мы root)
+    if [ "$EUID" -eq 0 ]; then
+        if sudo -u "$GUNICORN_USER" test -w "$DB_PATH" 2>/dev/null; then
+            echo "   ✅ Пользователь $GUNICORN_USER может писать в БД"
+        else
+            echo "   ✗ Пользователь $GUNICORN_USER НЕ может писать в БД"
+            echo "      Попробуйте: sudo chown -R $GUNICORN_USER:$GUNICORN_USER $DB_DIR"
+        fi
+    fi
 fi
 
 echo ""

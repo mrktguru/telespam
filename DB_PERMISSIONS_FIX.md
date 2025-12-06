@@ -3,6 +3,23 @@
 ## Проблема
 Ошибка `attempt to write a readonly database` возникает, когда база данных SQLite недоступна для записи.
 
+## Важно: Разница между системным пользователем и зарегистрированным пользователем
+
+**Системный пользователь (пользователь ОС)** - это пользователь, от имени которого запускается веб-сервер (gunicorn). Это может быть:
+- `www-data` (стандартный пользователь для веб-серверов на Debian/Ubuntu)
+- `gunicorn` (специальный пользователь для gunicorn)
+- `root` (не рекомендуется для продакшена)
+- Другой системный пользователь, указанный в systemd service
+
+**Зарегистрированный пользователь в веб-интерфейсе** - это запись в таблице `users` в базе данных. Это просто данные для авторизации в веб-интерфейсе, а не системный пользователь ОС.
+
+**База данных должна принадлежать системному пользователю**, который запускает веб-сервер, а НЕ зарегистрированному пользователю в веб-интерфейсе.
+
+Пример:
+- Веб-сервер запускается от пользователя `www-data` (системный пользователь)
+- В веб-интерфейсе зарегистрирован пользователь `admin@example.com` (запись в БД)
+- База данных `telespam.db` должна принадлежать `www-data`, а не `admin@example.com`
+
 ## Быстрое решение
 
 ### Вариант 1: Автоматический скрипт (рекомендуется)
@@ -40,16 +57,23 @@ sudo chown gunicorn_user:gunicorn_user .
 ### Вариант 3: Для systemd сервиса
 
 ```bash
-# 1. Определите пользователя из systemd
-sudo systemctl show -p User telespam-web.service
+# 1. Определите системного пользователя из systemd (это НЕ зарегистрированный пользователь в веб-интерфейсе!)
+SYSTEM_USER=$(sudo systemctl show -p User telespam-web.service | cut -d= -f2)
+echo "Системный пользователь веб-сервера: $SYSTEM_USER"
 
-# 2. Исправьте права
+# 2. Исправьте права (база данных должна принадлежать системному пользователю)
 sudo chmod 755 /path/to/telespam
 sudo chmod 664 /path/to/telespam/telespam.db
-sudo chown gunicorn_user:gunicorn_user /path/to/telespam/telespam.db
-sudo chown gunicorn_user:gunicorn_user /path/to/telespam
+sudo chown $SYSTEM_USER:$SYSTEM_USER /path/to/telespam/telespam.db
+sudo chown $SYSTEM_USER:$SYSTEM_USER /path/to/telespam
 
-# 3. Перезапустите сервис
+# 3. Также исправьте права на WAL и SHM файлы
+sudo chmod 664 /path/to/telespam/telespam.db-wal 2>/dev/null || true
+sudo chmod 664 /path/to/telespam/telespam.db-shm 2>/dev/null || true
+sudo chown $SYSTEM_USER:$SYSTEM_USER /path/to/telespam/telespam.db-wal 2>/dev/null || true
+sudo chown $SYSTEM_USER:$SYSTEM_USER /path/to/telespam/telespam.db-shm 2>/dev/null || true
+
+# 4. Перезапустите сервис
 sudo systemctl restart telespam-web
 ```
 
@@ -74,13 +98,22 @@ ls -la telespam.db
 
 ## Типичные проблемы
 
-### 1. Файл создан от root, а веб-сервер работает от другого пользователя
+### 1. Файл создан от root, а веб-сервер работает от другого системного пользователя
+
+**Проблема**: База данных создана от `root`, но веб-сервер работает от другого пользователя (например, `www-data`).
+
+**Решение**: Измените владельца на системного пользователя веб-сервера (НЕ на зарегистрированного пользователя в веб-интерфейсе!):
 
 ```bash
-# Решение: измените владельца
-sudo chown www-data:www-data telespam.db
+# Определите системного пользователя веб-сервера
+SYSTEM_USER=$(sudo systemctl show -p User telespam-web.service | cut -d= -f2)
 # или
-sudo chown gunicorn:gunicorn telespam.db
+SYSTEM_USER=$(ps aux | grep gunicorn | grep -v grep | head -1 | awk '{print $1}')
+
+# Измените владельца
+sudo chown $SYSTEM_USER:$SYSTEM_USER telespam.db
+sudo chown $SYSTEM_USER:$SYSTEM_USER telespam.db-wal 2>/dev/null || true
+sudo chown $SYSTEM_USER:$SYSTEM_USER telespam.db-shm 2>/dev/null || true
 ```
 
 ### 2. Директория недоступна для записи
