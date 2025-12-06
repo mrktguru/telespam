@@ -157,6 +157,25 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
 
+        # Migrate existing accounts table to add api_id and api_hash if needed
+        try:
+            # Check if api_id column exists
+            cursor.execute("PRAGMA table_info(accounts)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            if 'api_id' not in columns:
+                print("Migrating accounts table: adding api_id column...")
+                cursor.execute('ALTER TABLE accounts ADD COLUMN api_id TEXT')
+            
+            if 'api_hash' not in columns:
+                print("Migrating accounts table: adding api_hash column...")
+                cursor.execute('ALTER TABLE accounts ADD COLUMN api_hash TEXT')
+            
+            conn.commit()
+        except Exception as e:
+            print(f"Warning: Could not migrate accounts table: {e}")
+            conn.rollback()
+
         # Users table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
