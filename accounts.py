@@ -299,9 +299,12 @@ async def add_account(account_data: Dict) -> Dict:
             "phone": account_data.get('phone'),
             "username": account_data.get('username', ''),
             "first_name": account_data.get('first_name', ''),
+            "last_name": account_data.get('last_name', ''),
             "session_file": account_data.get('session_file'),
             "status": account_data.get('status', config.AccountStatus.WARMING),
             "notes": account_data.get('notes', ''),
+            "api_id": account_data.get('api_id'),  # Store API credentials
+            "api_hash": account_data.get('api_hash'),  # Store API credentials
             "use_proxy": False,
             "proxy_type": "",
             "proxy_host": "",
