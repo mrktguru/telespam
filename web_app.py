@@ -132,10 +132,22 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             )
             print(f"DEBUG: Using account proxy {proxy_id} for account {phone}")
 
+    # Use account-specific API credentials if available, otherwise use config
+    # This is important because sessions created with different API credentials won't work
+    account_api_id = account.get('api_id') or config.API_ID
+    account_api_hash = account.get('api_hash') or config.API_HASH
+    
+    # Convert to int if string
+    if isinstance(account_api_id, str):
+        try:
+            account_api_id = int(account_api_id)
+        except (ValueError, TypeError):
+            account_api_id = config.API_ID
+    
     client = TelegramClient(
         str(session_file),
-        config.API_ID,
-        config.API_HASH,
+        account_api_id,
+        account_api_hash,
         proxy=proxy
     )
 
@@ -1341,10 +1353,10 @@ def accounts_list():
 
 @app.route('/accounts/delete/<account_id>', methods=['POST'])
 @login_required
-def delete_account(account_id):
+def delete_account_route(account_id):
     """Delete account"""
     try:
-        success = delete_account(account_id)
+        success = delete_account(account_id)  # Call the helper function, not itself
         
         if success:
             flash(f'Account {account_id} deleted successfully', 'success')
@@ -1650,6 +1662,20 @@ def add_account_tdata():
                 
                 if result['success']:
                     account_data = result['account']
+                    
+                    # Check if account already exists by phone
+                    existing_accounts = get_all_accounts()
+                    phone_from_result = account_data.get('phone', '')
+                    phone_normalized_check = phone_from_result.replace('+', '').replace(' ', '').replace('-', '').strip()
+                    for existing in existing_accounts:
+                        existing_phone = existing.get('phone', '').replace('+', '').replace(' ', '').replace('-', '').strip()
+                        if existing_phone == phone_normalized_check:
+                            return {'success': False, 'error': f'Account with phone {phone_from_result} already exists (ID: {existing.get("id")})'}
+                    
+                    # Store API credentials from config (used to process the session)
+                    account_data['api_id'] = config.API_ID
+                    account_data['api_hash'] = config.API_HASH
+                    
                     add_result = await add_account(account_data)
                     return add_result
                 else:
@@ -1723,6 +1749,14 @@ def add_account_manual():
                 me = await client.get_me()
                 await client.disconnect()
                 
+                # Check if account already exists by phone
+                existing_accounts = get_all_accounts()
+                phone_normalized_check = phone_normalized
+                for existing in existing_accounts:
+                    existing_phone = existing.get('phone', '').replace('+', '').replace(' ', '').replace('-', '').strip()
+                    if existing_phone == phone_normalized_check:
+                        return {'success': False, 'error': f'Account with phone {phone} already exists (ID: {existing.get("id")})'}
+                
                 account_data = {
                     'phone': me.phone,
                     'username': me.username or '',
@@ -1730,7 +1764,9 @@ def add_account_manual():
                     'last_name': me.last_name or '',
                     'session_file': str(session_file),
                     'status': 'active',
-                    'notes': notes or 'Web added manually'
+                    'notes': notes or 'Web added manually',
+                    'api_id': api_id,  # Store API credentials
+                    'api_hash': api_hash  # Store API credentials
                 }
                 
                 add_result = await add_account(account_data)
