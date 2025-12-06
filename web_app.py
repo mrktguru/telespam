@@ -331,12 +331,31 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 except Exception as e:
                     print(f"DEBUG: Direct user_id fallback setup failed: {e}")
             
-            # Strategy 6: Last resort - try InputUser with access_hash=0
+            # Strategy 6: Try InputPeerUser with access_hash=0 for spam/outreach
+            # This is specifically for sending to unknown users with correct API credentials
+            # IMPORTANT: This requires API credentials from my.telegram.org that allow messaging unknown users
+            if not target:
+                try:
+                    from telethon.tl.types import InputPeerUser
+                    print(f"DEBUG: Strategy 6: Trying InputPeerUser with access_hash=0 for ID: {user_id_value}")
+                    print(f"DEBUG: This is for spam/outreach to unknown users")
+                    print(f"DEBUG: Using API credentials: api_id={account_api_id}, api_hash={account_api_hash[:10]}...")
+                    print(f"DEBUG: NOTE: For this to work, API credentials must be from my.telegram.org and allow messaging unknown users")
+                    # Try to create InputPeerUser with access_hash=0
+                    # This sometimes works if API credentials are correct and user privacy allows
+                    target = InputPeerUser(user_id=user_id_value, access_hash=0)
+                    method_used = "InputPeerUser_access_hash_0"
+                    print(f"DEBUG: Using InputPeerUser(user_id={user_id_value}, access_hash=0) for direct send")
+                    print(f"DEBUG: If this fails, ensure API credentials are correct and allow messaging unknown users")
+                except Exception as e:
+                    print(f"DEBUG: InputPeerUser(access_hash=0) setup failed: {e}")
+            
+            # Strategy 7: Last resort - try InputUser with access_hash=0 and get_entity
             # Sometimes this works if the user was previously contacted
             if not target:
                 try:
                     from telethon.tl.types import InputUser, InputPeerUser
-                    print(f"DEBUG: Strategy 6: Trying InputUser with access_hash=0 for ID: {user_id_value}")
+                    print(f"DEBUG: Strategy 7: Trying InputUser with access_hash=0 for ID: {user_id_value}")
                     # Try to create InputUser with access_hash=0
                     input_user = InputUser(user_id=user_id_value, access_hash=0)
                     # Try to get entity using this InputUser
@@ -375,17 +394,27 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                     error_msg += f'\n  3. ResolveUsernameRequest - Skipped (no username provided)'
                 error_msg += f'\n  4. GetFullUserRequest - Failed to get user details'
                 error_msg += f'\n  5. Direct user_id send - Requires access_hash'
-                error_msg += f'\n  6. InputUser(access_hash=0) - User not previously contacted'
+                error_msg += f'\n  6. InputPeerUser(access_hash=0) - Failed (may need correct API credentials)'
+                error_msg += f'\n  7. InputUser(access_hash=0) - User not previously contacted'
                 error_msg += f'\n\nPossible reasons:'
                 error_msg += f'\n  • User has privacy settings that block messages from unknown users'
                 error_msg += f'\n  • User was never contacted by this account before'
                 error_msg += f'\n  • User is not in the account\'s contacts'
                 error_msg += f'\n  • User account may be restricted, deleted, or banned'
+                error_msg += f'\n\nIMPORTANT for spam/outreach to unknown users:'
+                error_msg += f'\n  • API credentials (API ID/HASH) must be from my.telegram.org'
+                error_msg += f'\n  • API credentials must allow messaging unknown users'
+                error_msg += f'\n  • Current API ID: {account_api_id}'
+                error_msg += f'\n  • Session must be created with these same API credentials'
+                error_msg += f'\n  • Check account settings in database: api_id and api_hash must be set correctly'
                 error_msg += f'\n\nSolutions:'
-                error_msg += f'\n  1. Ask the user to add your account to their contacts first'
-                error_msg += f'\n  2. Send a message to this user manually from the Telegram app using account {account.get("phone")}'
-                error_msg += f'\n  3. If username is available, try using it instead of user_id'
-                error_msg += f'\n  4. Check if the user account is active and not restricted'
+                error_msg += f'\n  1. Verify API credentials are correct in account settings (api_id={account_api_id})'
+                error_msg += f'\n  2. Ensure session was created with these API credentials'
+                error_msg += f'\n  3. Try re-creating session with correct API credentials from my.telegram.org'
+                error_msg += f'\n  4. Ask the user to add your account to their contacts first'
+                error_msg += f'\n  5. Send a message to this user manually from the Telegram app using account {account.get("phone")}'
+                error_msg += f'\n  6. If username is available, try using it instead of user_id'
+                error_msg += f'\n  7. Check if the user account is active and not restricted'
                 
                 return False, error_msg
 
@@ -478,10 +507,17 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                     error_msg += f'\n  • User has privacy settings blocking messages from unknown users'
                     error_msg += f'\n  • User was never contacted by this account before'
                     error_msg += f'\n  • User is not in the account\'s contacts'
+                    error_msg += f'\n\nIMPORTANT for spam/outreach:'
+                    error_msg += f'\n  • API credentials must be from my.telegram.org and allow messaging unknown users'
+                    error_msg += f'\n  • Current API ID: {account_api_id}'
+                    error_msg += f'\n  • Session must be created with these same API credentials'
                     error_msg += f'\n\nSolutions:'
-                    error_msg += f'\n  1. Ask the user to add your account to their contacts'
-                    error_msg += f'\n  2. Send a message manually from account {account.get("phone")} first'
-                    error_msg += f'\n  3. Check if the user account is active'
+                    error_msg += f'\n  1. Verify API credentials are correct (api_id={account_api_id})'
+                    error_msg += f'\n  2. Ensure session was created with these API credentials'
+                    error_msg += f'\n  3. Try re-creating session with correct API credentials'
+                    error_msg += f'\n  4. Ask the user to add your account to their contacts'
+                    error_msg += f'\n  5. Send a message manually from account {account.get("phone")} first'
+                    error_msg += f'\n  6. Check if the user account is active'
                     error_msg += f'\n\nError details: {error_str}'
                     
                     return False, error_msg
@@ -535,16 +571,24 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 error_msg += f'\n  3. ResolveUsernameRequest - Skipped (no username)'
             error_msg += f'\n  4. GetFullUserRequest - Failed'
             error_msg += f'\n  5. Direct user_id send - Failed'
-            error_msg += f'\n  6. InputUser(access_hash=0) - Failed'
+            error_msg += f'\n  6. InputPeerUser(access_hash=0) - Failed (may need correct API credentials)'
+            error_msg += f'\n  7. InputUser(access_hash=0) - Failed'
             error_msg += f'\n\nPossible reasons:'
             error_msg += f'\n  • User has privacy settings blocking messages from unknown users'
             error_msg += f'\n  • User was never contacted by this account before'
             error_msg += f'\n  • User is not in the account\'s contacts'
             error_msg += f'\n  • User account may be restricted, deleted, or banned'
+            error_msg += f'\n\nIMPORTANT for spam/outreach:'
+            error_msg += f'\n  • API credentials must be from my.telegram.org and allow messaging unknown users'
+            error_msg += f'\n  • Current API ID: {account_api_id}'
+            error_msg += f'\n  • Session must be created with these same API credentials'
             error_msg += f'\n\nSolutions:'
-            error_msg += f'\n  1. Ask the user to add your account to their contacts'
-            error_msg += f'\n  2. Send a message manually from account {account.get("phone")} first'
-            error_msg += f'\n  3. Check if the user account is active'
+            error_msg += f'\n  1. Verify API credentials are correct (api_id={account_api_id})'
+            error_msg += f'\n  2. Ensure session was created with these API credentials'
+            error_msg += f'\n  3. Try re-creating session with correct API credentials'
+            error_msg += f'\n  4. Ask the user to add your account to their contacts'
+            error_msg += f'\n  5. Send a message manually from account {account.get("phone")} first'
+            error_msg += f'\n  6. Check if the user account is active'
             error_msg += f'\n\nError details: {error_str}'
             
             return False, error_msg
