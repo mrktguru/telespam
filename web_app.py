@@ -359,23 +359,35 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             # If still no target, we cannot send - need access_hash
             if not target:
                 await client.disconnect()
-                error_details = []
-                error_details.append("Tried methods:")
-                error_details.append("1. get_entity(user_id)")
-                error_details.append("2. GetUsersRequest([user_id])")
+                # Create a more user-friendly error message
+                user_id_display = user.get("user_id", "unknown")
+                username_display = user.get("username", "not provided")
+                phone_display = user.get("phone", "not provided")
+                
+                error_msg = f'User not accessible: {user_id_display}'
+                error_msg += f'\n\nUser details: ID={user_id_display}, Username={username_display}, Phone={phone_display}'
+                error_msg += f'\n\nAll resolution methods failed:'
+                error_msg += f'\n  1. get_entity(user_id) - User not in contacts or never contacted'
+                error_msg += f'\n  2. GetUsersRequest([user_id]) - User not accessible via API'
                 if user.get('username'):
-                    error_details.append(f"3. ResolveUsernameRequest(username={user.get('username')})")
+                    error_msg += f'\n  3. ResolveUsernameRequest(username={user.get("username")}) - Username resolution failed'
                 else:
-                    error_details.append("3. ResolveUsernameRequest (skipped - no username)")
-                error_details.append("4. GetFullUserRequest")
-                error_details.append("5. Direct user_id send")
-                error_details.append("6. InputUser(access_hash=0)")
-                error_details.append("")
-                error_details.append("All methods failed. This usually means:")
-                error_details.append("- User has privacy settings preventing messages from unknown users")
-                error_details.append("- User was never contacted before and is not in contacts")
-                error_details.append("- User account may be restricted or deleted")
-                return False, f'User not accessible: {user.get("user_id")}. Could not resolve user entity (no access_hash). {" | ".join(error_details)}'
+                    error_msg += f'\n  3. ResolveUsernameRequest - Skipped (no username provided)'
+                error_msg += f'\n  4. GetFullUserRequest - Failed to get user details'
+                error_msg += f'\n  5. Direct user_id send - Requires access_hash'
+                error_msg += f'\n  6. InputUser(access_hash=0) - User not previously contacted'
+                error_msg += f'\n\nPossible reasons:'
+                error_msg += f'\n  • User has privacy settings that block messages from unknown users'
+                error_msg += f'\n  • User was never contacted by this account before'
+                error_msg += f'\n  • User is not in the account\'s contacts'
+                error_msg += f'\n  • User account may be restricted, deleted, or banned'
+                error_msg += f'\n\nSolutions:'
+                error_msg += f'\n  1. Ask the user to add your account to their contacts first'
+                error_msg += f'\n  2. Send a message to this user manually from the Telegram app using account {account.get("phone")}'
+                error_msg += f'\n  3. If username is available, try using it instead of user_id'
+                error_msg += f'\n  4. Check if the user account is active and not restricted'
+                
+                return False, error_msg
 
             # Send message with or without media, using HTML parsing
             try:
@@ -452,11 +464,27 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                     print(f"DEBUG: Entity error with method {method_used}: {error_str}")
                     print(f"DEBUG: User ID: {user_id_value}, Username: {user.get('username')}, Phone: {user.get('phone')}")
                     await client.disconnect()
-                    methods_tried = []
+                    
+                    # Create a more user-friendly error message
+                    user_id_display = user.get("user_id", "unknown")
+                    username_display = user.get("username", "not provided")
+                    phone_display = user.get("phone", "not provided")
+                    
+                    error_msg = f'User not accessible: {user_id_display}'
+                    error_msg += f'\n\nUser details: ID={user_id_display}, Username={username_display}, Phone={phone_display}'
                     if method_used:
-                        methods_tried.append(f"Last tried: {method_used}")
-                    methods_tried.append("All resolution methods failed (get_entity, GetUsersRequest, ResolveUsernameRequest, etc.)")
-                    return False, f'User not accessible: {user.get("user_id")}. Could not find the input entity. {" | ".join(methods_tried)}. User may not be accessible via API or may have privacy restrictions. Error: {error_str}'
+                        error_msg += f'\n\nLast method tried: {method_used}'
+                    error_msg += f'\n\nAll resolution methods failed. This usually means:'
+                    error_msg += f'\n  • User has privacy settings blocking messages from unknown users'
+                    error_msg += f'\n  • User was never contacted by this account before'
+                    error_msg += f'\n  • User is not in the account\'s contacts'
+                    error_msg += f'\n\nSolutions:'
+                    error_msg += f'\n  1. Ask the user to add your account to their contacts'
+                    error_msg += f'\n  2. Send a message manually from account {account.get("phone")} first'
+                    error_msg += f'\n  3. Check if the user account is active'
+                    error_msg += f'\n\nError details: {error_str}'
+                    
+                    return False, error_msg
                 else:
                     # Other ValueError/TypeError, re-raise
                     raise
@@ -490,21 +518,36 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             print(f"DEBUG: General exception handler - Entity error: {error_str}")
             print(f"DEBUG: User ID: {user.get('user_id')}, Username: {user.get('username')}, Phone: {user.get('phone')}")
             await client.disconnect()
-            methods_info = []
-            methods_info.append("Resolution methods attempted:")
-            methods_info.append("1. get_entity(user_id)")
-            methods_info.append("2. GetUsersRequest([user_id])")
+            
+            # Create a more user-friendly error message
+            user_id_display = user.get("user_id", "unknown")
+            username_display = user.get("username", "not provided")
+            phone_display = user.get("phone", "not provided")
+            
+            error_msg = f'User not accessible: {user_id_display}'
+            error_msg += f'\n\nUser details: ID={user_id_display}, Username={username_display}, Phone={phone_display}'
+            error_msg += f'\n\nAll resolution methods attempted:'
+            error_msg += f'\n  1. get_entity(user_id) - Failed'
+            error_msg += f'\n  2. GetUsersRequest([user_id]) - Failed'
             if user.get('username'):
-                methods_info.append(f"3. ResolveUsernameRequest(username={user.get('username')})")
-            methods_info.append("4. GetFullUserRequest")
-            methods_info.append("5. Direct user_id send")
-            methods_info.append("6. InputUser(access_hash=0)")
-            methods_info.append("")
-            methods_info.append("Possible reasons:")
-            methods_info.append("- User privacy settings prevent messages from unknown users")
-            methods_info.append("- User was never contacted and is not in contacts")
-            methods_info.append("- User account may be restricted or deleted")
-            return False, f'User not accessible: {user.get("user_id")}. Could not find user entity. {" | ".join(methods_info)} Error: {error_str}'
+                error_msg += f'\n  3. ResolveUsernameRequest(username={user.get("username")}) - Failed'
+            else:
+                error_msg += f'\n  3. ResolveUsernameRequest - Skipped (no username)'
+            error_msg += f'\n  4. GetFullUserRequest - Failed'
+            error_msg += f'\n  5. Direct user_id send - Failed'
+            error_msg += f'\n  6. InputUser(access_hash=0) - Failed'
+            error_msg += f'\n\nPossible reasons:'
+            error_msg += f'\n  • User has privacy settings blocking messages from unknown users'
+            error_msg += f'\n  • User was never contacted by this account before'
+            error_msg += f'\n  • User is not in the account\'s contacts'
+            error_msg += f'\n  • User account may be restricted, deleted, or banned'
+            error_msg += f'\n\nSolutions:'
+            error_msg += f'\n  1. Ask the user to add your account to their contacts'
+            error_msg += f'\n  2. Send a message manually from account {account.get("phone")} first'
+            error_msg += f'\n  3. Check if the user account is active'
+            error_msg += f'\n\nError details: {error_str}'
+            
+            return False, error_msg
         await client.disconnect()
         return False, f'Error sending to user {user.get("user_id")}: {error_str}'
 
