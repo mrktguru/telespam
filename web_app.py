@@ -1676,6 +1676,15 @@ def add_account_tdata():
                     me = await client.get_me()
                     await client.disconnect()
                     
+                    # Check if account already exists by phone BEFORE adding
+                    existing_accounts = get_all_accounts()
+                    phone_from_me = me.phone or phone
+                    phone_normalized_check = phone_from_me.replace('+', '').replace(' ', '').replace('-', '').strip()
+                    for existing in existing_accounts:
+                        existing_phone = existing.get('phone', '').replace('+', '').replace(' ', '').replace('-', '').strip()
+                        if existing_phone == phone_normalized_check:
+                            return {'success': False, 'error': f'Account with phone {phone_from_me} already exists (ID: {existing.get("id")})'}
+                    
                     account_data = {
                         'phone': me.phone,
                         'username': me.username or '',
