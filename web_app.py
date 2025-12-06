@@ -1700,9 +1700,16 @@ def add_account_tdata():
                         if existing_phone == phone_normalized_check:
                             return {'success': False, 'error': f'Account with phone {phone_from_result} already exists (ID: {existing.get("id")})'}
                     
-                    # Store API credentials from config (used to process the session)
-                    account_data['api_id'] = config.API_ID
-                    account_data['api_hash'] = config.API_HASH
+                    # Ensure API credentials are set (should already be in account_data from converter, but set as fallback)
+                    if not account_data.get('api_id'):
+                        account_data['api_id'] = config.API_ID
+                    if not account_data.get('api_hash'):
+                        account_data['api_hash'] = config.API_HASH
+                    
+                    # Ensure all required fields have defaults
+                    account_data.setdefault('last_name', '')
+                    account_data.setdefault('username', '')
+                    account_data.setdefault('first_name', '')
                     
                     add_result = await add_account(account_data)
                     return add_result
