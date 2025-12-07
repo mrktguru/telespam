@@ -292,7 +292,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                         else:
                             print(f"DEBUG: ResolveUsernameRequest returned empty result or no users")
                             print(f"DEBUG: Response type: {type(resolved)}, attributes: {[attr for attr in dir(resolved) if not attr.startswith('_')]}")
-            except Exception as e:
+                    except Exception as e:
                         print(f"DEBUG: ResolveUsernameRequest failed: {e}")
                         print(f"DEBUG: Exception type: {type(e)}")
                         import traceback
