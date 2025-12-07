@@ -431,7 +431,8 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         except Exception as e:
             error_str = str(e)
             await client.disconnect()
-            return False, f'Invalid user_id format: {user.get("user_id")} - {error_str}'
+            # Don't mislead with "Invalid user_id format" - just show the actual error
+            return False, f'Error sending message: {error_str}'
 
     except FloodWaitError as e:
         await client.disconnect()
