@@ -292,7 +292,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                         else:
                             print(f"DEBUG: ResolveUsernameRequest returned empty result or no users")
                             print(f"DEBUG: Response type: {type(resolved)}, attributes: {[attr for attr in dir(resolved) if not attr.startswith('_')]}")
-                    except Exception as e:
+            except Exception as e:
                         print(f"DEBUG: ResolveUsernameRequest failed: {e}")
                         print(f"DEBUG: Exception type: {type(e)}")
                         import traceback
@@ -327,7 +327,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             else:
                                 print(f"DEBUG: ⚠ get_entity returned entity but no access_hash or not a User")
                                 print(f"DEBUG: Entity type: {type(entity)}, attributes: {[attr for attr in dir(entity) if not attr.startswith('_')]}")
-                        except Exception as e:
+            except Exception as e:
                             print(f"DEBUG: get_entity (username) failed: {e}")
                             print(f"DEBUG: Exception type: {type(e)}")
                             import traceback
@@ -343,7 +343,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             target = username_with_at
                             method_used = "direct_username_send"
                             print(f"DEBUG: Using username directly for send (may fail if access_hash required): {username_with_at}")
-                        except Exception as e:
+            except Exception as e:
                             print(f"DEBUG: Direct username send setup failed: {e}")
             
             # PRIORITY 2: Try user_id (if username not available or failed)
@@ -377,7 +377,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                     method_used = "get_entity_user_id"
                                     user_entity_cache[cache_key] = target
                                     print(f"DEBUG: ✓ Found user via get_entity (ID): {user_id_value} (cached)")
-            except Exception as e:
+                            except Exception as e:
                                 print(f"DEBUG: get_entity (ID) failed: {e}")
 
                             # Strategy 2: Try GetUsersRequest
