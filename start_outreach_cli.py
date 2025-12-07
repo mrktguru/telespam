@@ -40,12 +40,13 @@ async def send_message_to_user(account, user, message_text, settings):
     from sender import send_message
 
     try:
-        # Resolve username to ID if needed
+        # Get user identifiers - prefer username over user_id for strangers
         user_id = user.get('user_id')
         username = user.get('username')
 
-        if not user_id and username:
-            # Try to resolve username to ID using account
+        # PRIORITY: Use username if available (works for strangers)
+        if username:
+            # Username is best for strangers - send directly by username
             from telethon import TelegramClient
             from proxy import get_client
 
@@ -53,28 +54,73 @@ async def send_message_to_user(account, user, message_text, settings):
             await client.connect()
 
             try:
-                entity = await client.get_entity(username)
-                user_id = entity.id
-                user['user_id'] = user_id  # Update for future use
+                # Send directly to username (no need to resolve first)
+                target = username if not username.startswith('@') else username[1:]
+
+                # Send message
+                sent_msg = await client.send_message(f"@{target}", message_text or "")
+
+                print_success(f"Message sent to @{target}")
+
+                # Increment account usage
+                daily_sent = int(account.get('daily_sent') or 0) + 1
+                total_sent = int(account.get('total_sent') or 0) + 1
+                sheets_manager.update_account(account['id'], {
+                    'daily_sent': daily_sent,
+                    'total_sent': total_sent
+                })
+
+                # Log success
+                sheets_manager.add_log({
+                    "account_id": account['id'],
+                    "user_id": user_id or 0,
+                    "action": "send",
+                    "message_type": "text",
+                    "result": "success",
+                    "details": f"Message sent to @{target}"
+                })
+
+                await client.disconnect()
+
+                return {
+                    'success': True,
+                    'message': f'Sent to @{target}',
+                    'message_id': sent_msg.id if sent_msg else None
+                }
             except Exception as e:
-                print_error(f"Could not resolve @{username}: {e}")
+                print_error(f"Could not send to @{username}: {e}")
+
+                # Log error
+                sheets_manager.add_log({
+                    "account_id": account['id'],
+                    "user_id": user_id or 0,
+                    "action": "send",
+                    "message_type": "text",
+                    "result": "error",
+                    "details": f"Error sending to @{username}: {str(e)}"
+                })
+
                 await client.disconnect()
                 return {
                     'success': False,
-                    'error': f'Could not resolve username: {e}'
+                    'error': f'Could not send to username: {e}'
                 }
 
-            await client.disconnect()
-
-        # Send message
-        result = await send_message(
-            user_id=user_id,
-            message_type='text',
-            content=message_text,
-            account_id=account['id']
-        )
-
-        return result
+        # FALLBACK: Use user_id if no username (requires prior interaction)
+        elif user_id:
+            # Send message via sender.py (has entity resolution logic)
+            result = await send_message(
+                user_id=user_id,
+                message_type='text',
+                content=message_text,
+                account_id=account['id']
+            )
+            return result
+        else:
+            return {
+                'success': False,
+                'error': 'No username or user_id provided'
+            }
 
     except Exception as e:
         return {
