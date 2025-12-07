@@ -190,333 +190,159 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 print(f"⚠ Account {account.get('phone')} ({account_id}) marked as unauthorized")
             return False, 'Account not authorized - session expired or invalid'
 
-        # Find user by ID only (from XLS table)
-        # PRIORITY: USER_ID
-        # Strategy: Try direct send first, then GetUsersRequest if needed, with caching
+        # PRIORITY: USERNAME FIRST, then USER_ID
+        # Strategy: Try username first (most reliable for unknown users), then user_id as fallback
         
-        if not user.get('user_id'):
+        username = user.get('username', '').strip().lstrip('@') if user.get('username') else None
+        raw_user_id = user.get('user_id')
+        
+        # DIAGNOSTIC: Log raw data from database before processing
+        print(f"DEBUG: ===== USER RESOLUTION: Raw user data from SQLite =====")
+        print(f"DEBUG: Full user dict: {user}")
+        print(f"DEBUG: user['user_id'] = {raw_user_id} (type: {type(raw_user_id)})")
+        print(f"DEBUG: user['username'] = {username} (type: {type(username)})")
+        print(f"DEBUG: user['phone'] = {user.get('phone')} (type: {type(user.get('phone'))})")
+        
+        # Validate: need at least username or user_id
+        if not username and not raw_user_id:
             await client.disconnect()
-            return False, 'User ID is required'
+            return False, 'Either username or user_id is required'
+        
+        target = None
+        method_used = None
         
         try:
-            # DIAGNOSTIC: Log raw data from database before processing
-            print(f"DEBUG: ===== MIGRATION DIAGNOSTIC: Raw user data from SQLite =====")
-            print(f"DEBUG: Full user dict: {user}")
-            print(f"DEBUG: user['user_id'] = {user.get('user_id')} (type: {type(user.get('user_id'))})")
-            print(f"DEBUG: user['username'] = {user.get('username')} (type: {type(user.get('username'))})")
-            print(f"DEBUG: user['phone'] = {user.get('phone')} (type: {type(user.get('phone'))})")
-            
-            # Convert user_id to int (can be string from DB)
-            raw_user_id = user.get('user_id')
-            if raw_user_id is None:
-                await client.disconnect()
-                print(f"DEBUG: ERROR: user_id is None in database!")
-                return False, 'User ID is None in database - migration issue?'
-            
-            user_id_str = str(raw_user_id).strip()
-            if not user_id_str or user_id_str == 'None' or user_id_str == '':
-                await client.disconnect()
-                print(f"DEBUG: ERROR: user_id is empty after conversion: '{user_id_str}'")
-                return False, f'User ID is empty after conversion: "{user_id_str}" (original: {raw_user_id}, type: {type(raw_user_id)})'
-            
-            # Try to convert to int
-            try:
-                user_id_value = int(user_id_str)
-            except (ValueError, TypeError) as conv_error:
-                await client.disconnect()
-                print(f"DEBUG: ERROR: Cannot convert user_id to int: '{user_id_str}' (type: {type(user_id_str)})")
-                print(f"DEBUG: Conversion error: {conv_error}")
-                return False, f'Invalid user_id format: "{user_id_str}" (type: {type(user_id_str)}). Cannot convert to int. Migration issue?'
-            
-            print(f"DEBUG: ✓ Successfully converted user_id: '{raw_user_id}' (type: {type(raw_user_id)}) -> {user_id_value} (int)")
-            print(f"DEBUG: Sending to user ID: {user_id_value} (original from DB: {raw_user_id}, type: {type(raw_user_id)})")
-            print(f"DEBUG: ===== END MIGRATION DIAGNOSTIC =====")
-            
-            # CRITICAL FIX: Ensure user_id_value is int, not string
-            # Telethon requires INTEGER, not STRING for user_id
-            if not isinstance(user_id_value, int):
-                print(f"DEBUG: WARNING: user_id_value is not int! Converting: {user_id_value} (type: {type(user_id_value)})")
-                try:
-                    user_id_value = int(user_id_value)
-                    print(f"DEBUG: ✓ Converted to int: {user_id_value} (type: {type(user_id_value)})")
-                except (ValueError, TypeError) as e:
-                    await client.disconnect()
-                    return False, f'Cannot convert user_id to int: {user_id_value} (type: {type(user_id_value)}). Error: {e}'
-            
-            # Verify it's actually int
-            assert isinstance(user_id_value, int), f"user_id_value must be int, got {type(user_id_value)}"
-            print(f"DEBUG: ✓ Verified user_id_value is int: {user_id_value} (type: {type(user_id_value)})")
-            
-            # Check cache first
-            cache_key = f"{user_id_value}"
-            target = None
-            method_used = None
-            
-            if cache_key in user_entity_cache:
-                target = user_entity_cache[cache_key]
-                method_used = "cache"
-                print(f"DEBUG: ✓ Using cached entity for ID: {user_id_value}")
-            
-            # Strategy 1: Try get_entity first (works if user in contacts or was contacted)
-            if not target:
-                try:
-                    # CRITICAL: Ensure user_id_value is int for get_entity
-                    if not isinstance(user_id_value, int):
-                        print(f"DEBUG: WARNING: user_id_value is not int in get_entity! Converting...")
-                        user_id_value = int(user_id_value)
-                    entity = await client.get_entity(user_id_value)
-                    from telethon.tl.types import InputPeerUser
-                    if hasattr(entity, 'access_hash'):
-                        target = InputPeerUser(user_id=entity.id, access_hash=entity.access_hash)
-                        method_used = "get_entity"
-                        # Cache successful resolution
-                        user_entity_cache[cache_key] = target
-                        print(f"DEBUG: ✓ Found user via get_entity: {user_id_value} (cached)")
-                except Exception as e:
-                    print(f"DEBUG: get_entity failed: {e}")
-            
-            # Strategy 2: Try GetUsersRequest to get access_hash BEFORE sending
-            # This is more reliable than direct send without access_hash
-            if not target:
-                try:
-                    from telethon.tl.functions.users import GetUsersRequest
-                    from telethon.tl.types import InputPeerUser
-                    print(f"DEBUG: Strategy 2: Trying GetUsersRequest for ID: {user_id_value} (type: {type(user_id_value)})")
-                    # CRITICAL: Ensure user_id_value is int, not string
-                    if not isinstance(user_id_value, int):
-                        print(f"DEBUG: WARNING: user_id_value is not int in GetUsersRequest! Converting...")
-                        user_id_value = int(user_id_value)
-                    
-                    # Try multiple approaches for GetUsersRequest
-                    users_result = None
+            # PRIORITY 1: Try username first (if available)
+            if username:
+                print(f"DEBUG: ===== PRIORITY 1: Resolving by USERNAME: {username} =====")
+                
+                # Check cache first
+                username_cache_key = f"username:{username}"
+                if username_cache_key in user_entity_cache:
+                    target = user_entity_cache[username_cache_key]
+                    method_used = "cache_username"
+                    print(f"DEBUG: ✓ Using cached entity for username: {username}")
+                else:
+                    # Strategy 1: Try ResolveUsernameRequest (best for unknown users)
                     try:
-                        # Approach 1: Try with plain int first (most common case)
-                        print(f"DEBUG: GetUsersRequest Approach 1: Plain int")
-                        users_result = await client(GetUsersRequest([user_id_value]))
-                        print(f"DEBUG: ✓ GetUsersRequest Approach 1 succeeded")
-                    except Exception as e1:
-                        print(f"DEBUG: GetUsersRequest Approach 1 failed: {e1}")
-                        try:
-                            # Approach 2: Try with InputUser(user_id, access_hash=0)
-                            from telethon.tl.types import InputUser
-                            print(f"DEBUG: GetUsersRequest Approach 2: InputUser with access_hash=0")
-                            input_user = InputUser(user_id=user_id_value, access_hash=0)
-                            users_result = await client(GetUsersRequest([input_user]))
-                            print(f"DEBUG: ✓ GetUsersRequest Approach 2 succeeded")
-                        except Exception as e2:
-                            print(f"DEBUG: GetUsersRequest Approach 2 failed: {e2}")
-                            try:
-                                # Approach 3: Try with InputUserEmpty (sometimes works)
-                                from telethon.tl.types import InputUserEmpty
-                                print(f"DEBUG: GetUsersRequest Approach 3: InputUserEmpty")
-                                # Actually, InputUserEmpty won't work, skip this
-                                users_result = None
-                            except Exception as e3:
-                                print(f"DEBUG: GetUsersRequest Approach 3 failed: {e3}")
-                                users_result = None
-                    
-                    # DETAILED LOGGING: Check what GetUsersRequest returned (if any)
-                    if users_result and len(users_result) > 0:
-                            user_obj = users_result[0]
-                            print(f"DEBUG: ===== GetUsersRequest RESULT DETAILS =====")
-                            print(f"DEBUG: GetUsersRequest returned {len(users_result)} user(s)")
-                            print(f"DEBUG: First user object:")
-                            print(f"  - user.id: {getattr(user_obj, 'id', 'N/A')}")
-                            print(f"  - user.min: {getattr(user_obj, 'min', 'N/A')}  # ← IMPORTANT: min field")
-                            print(f"  - user.access_hash: {getattr(user_obj, 'access_hash', 'N/A')}")
-                            print(f"  - user.deleted: {getattr(user_obj, 'deleted', False)}")
-                            print(f"  - user.restricted: {getattr(user_obj, 'restricted', False)}")
-                            print(f"  - user.scam: {getattr(user_obj, 'scam', False)}")
-                            print(f"  - user.fake: {getattr(user_obj, 'fake', False)}")
-                            print(f"  - user.bot: {getattr(user_obj, 'bot', False)}")
-                            print(f"  - user.verified: {getattr(user_obj, 'verified', False)}")
-                            print(f"  - user.username: {getattr(user_obj, 'username', 'N/A')}")
-                            print(f"  - user.first_name: {getattr(user_obj, 'first_name', 'N/A')}")
-                            print(f"  - user.last_name: {getattr(user_obj, 'last_name', 'N/A')}")
-                            print(f"  - user.phone: {getattr(user_obj, 'phone', 'N/A')}")
-                            print(f"  - user.class_name: {user_obj.__class__.__name__}")
-                            print(f"  - All attributes: {[attr for attr in dir(user_obj) if not attr.startswith('_')]}")
-                            print(f"DEBUG: ===== END GetUsersRequest RESULT =====")
+                        from telethon.tl.functions.contacts import ResolveUsernameRequest
+                        from telethon.tl.types import InputPeerUser
+                        print(f"DEBUG: Strategy 1: Trying ResolveUsernameRequest for username: {username}")
+                        resolved = await client(ResolveUsernameRequest(username))
+                        if resolved and hasattr(resolved, 'users') and len(resolved.users) > 0:
+                            user_obj = resolved.users[0]
+                            print(f"DEBUG: ResolveUsernameRequest succeeded: user_id={user_obj.id}, username={getattr(user_obj, 'username', 'N/A')}")
                             
                             # Check if user is deleted or empty
-                            if hasattr(user_obj, 'min') and user_obj.min:
-                                print(f"DEBUG: ⚠ WARNING: user.min is True - user may be deleted or empty!")
-                            
                             if hasattr(user_obj, 'deleted') and user_obj.deleted:
-                                print(f"DEBUG: ⚠ WARNING: user.deleted is True - user account is deleted!")
+                                print(f"DEBUG: ❌ User account is deleted")
+                                await client.disconnect()
+                                return False, f'User account is deleted (username: {username})'
                             
-                    # If GetUsersRequest failed, try get_input_entity as alternative
-                    if not users_result:
-                        print(f"DEBUG: GetUsersRequest failed, trying get_input_entity as alternative...")
-                        try:
-                            # CRITICAL: Ensure user_id_value is int for get_input_entity
-                            if not isinstance(user_id_value, int):
-                                print(f"DEBUG: WARNING: user_id_value is not int in get_input_entity! Converting...")
-                                user_id_value = int(user_id_value)
-                            # Sometimes get_input_entity works better
-                            input_entity = await client.get_input_entity(user_id_value)
-                            if hasattr(input_entity, 'user_id') and hasattr(input_entity, 'access_hash'):
-                                target = InputPeerUser(user_id=input_entity.user_id, access_hash=input_entity.access_hash)
-                                method_used = "get_input_entity"
-                                user_entity_cache[cache_key] = target
-                                print(f"DEBUG: ✓ Got access_hash via get_input_entity for ID: {user_id_value} (cached)")
-                        except Exception as e2:
-                            print(f"DEBUG: get_input_entity also failed: {e2}")
-                            import traceback
-                            print(f"DEBUG: get_input_entity traceback: {traceback.format_exc()}")
-                    
-                    if not target and users_result and len(users_result) > 0:
-                        user_obj = users_result[0]
-                        
-                        # Check if user is valid (not deleted, not empty)
-                        is_deleted = getattr(user_obj, 'deleted', False)
-                        is_min = getattr(user_obj, 'min', False)
-                        
-                        if is_deleted or is_min:
-                            print(f"DEBUG: ⚠ User is deleted or empty (deleted={is_deleted}, min={is_min}), cannot send message")
-                            # Still try to get access_hash if available
-                        
-                        print(f"DEBUG: Processing GetUsersRequest result: id={user_obj.id}, has_access_hash={hasattr(user_obj, 'access_hash')}, access_hash={getattr(user_obj, 'access_hash', None)}")
-                        
-                        # Check if user is deleted or empty (min=True)
-                        if is_deleted:
-                            print(f"DEBUG: ❌ User account is deleted, cannot send message")
-                            await client.disconnect()
-                            return False, f'User account is deleted (user_id: {user_id_value})'
-                        
-                        if is_min:
-                            print(f"DEBUG: ❌ User is empty (min=True), cannot send message")
-                            await client.disconnect()
-                            return False, f'User is empty or not accessible (user_id: {user_id_value}, min=True)'
-                        
-                        if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
-                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                            method_used = "GetUsersRequest"
-                            # Cache successful resolution
-                            user_entity_cache[cache_key] = target
-                            print(f"DEBUG: ✓ Got access_hash via GetUsersRequest for ID: {user_id_value} (cached)")
+                            if hasattr(user_obj, 'min') and user_obj.min:
+                                print(f"DEBUG: ❌ User is empty (min=True)")
+                                await client.disconnect()
+                                return False, f'User is empty or not accessible (username: {username}, min=True)'
+                            
+                            if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
+                                target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                                method_used = "ResolveUsernameRequest"
+                                # Cache successful resolution by both username and ID
+                                user_entity_cache[username_cache_key] = target
+                                if user_obj.id:
+                                    user_entity_cache[f"{user_obj.id}"] = target
+                                print(f"DEBUG: ✓ Got access_hash via ResolveUsernameRequest for username: {username} (cached)")
+                            else:
+                                print(f"DEBUG: ⚠ ResolveUsernameRequest returned user but no access_hash")
                         else:
-                            print(f"DEBUG: GetUsersRequest returned user but no access_hash (user_obj type: {type(user_obj)})")
-                            # Check if it's a UserEmpty or similar
-                            if hasattr(user_obj, '__class__'):
-                                print(f"DEBUG: User object class: {user_obj.__class__.__name__}")
+                            print(f"DEBUG: ResolveUsernameRequest returned empty result")
+                    except Exception as e:
+                        print(f"DEBUG: ResolveUsernameRequest failed: {e}")
+                    
+                    # Strategy 2: Try get_entity by username (if ResolveUsernameRequest failed)
+                    if not target:
+                        try:
+                            print(f"DEBUG: Strategy 2: Trying get_entity for username: {username}")
+                            entity = await client.get_entity(username)
+                            from telethon.tl.types import InputPeerUser
+                            if hasattr(entity, 'access_hash') and entity.access_hash:
+                                target = InputPeerUser(user_id=entity.id, access_hash=entity.access_hash)
+                                method_used = "get_entity_username"
+                                # Cache successful resolution
+                                user_entity_cache[username_cache_key] = target
+                                if entity.id:
+                                    user_entity_cache[f"{entity.id}"] = target
+                                print(f"DEBUG: ✓ Found user via get_entity (username): {username} (cached)")
+                        except Exception as e:
+                            print(f"DEBUG: get_entity (username) failed: {e}")
+            
+            # PRIORITY 2: Try user_id (if username not available or failed)
+            if not target and raw_user_id:
+                print(f"DEBUG: ===== PRIORITY 2: Resolving by USER_ID: {raw_user_id} =====")
+                
+                # Convert user_id to int (can be string from DB)
+                user_id_str = str(raw_user_id).strip()
+                if not user_id_str or user_id_str == 'None' or user_id_str == '':
+                    print(f"DEBUG: ERROR: user_id is empty after conversion: '{user_id_str}'")
+                else:
+                    # Try to convert to int
+                    try:
+                        user_id_value = int(user_id_str)
+                        print(f"DEBUG: ✓ Converted user_id to int: {user_id_value}")
+                        
+                        # Check cache first
+                        cache_key = f"{user_id_value}"
+                        if cache_key in user_entity_cache:
+                            target = user_entity_cache[cache_key]
+                            method_used = "cache_user_id"
+                            print(f"DEBUG: ✓ Using cached entity for ID: {user_id_value}")
+                        else:
+                            # Strategy 1: Try get_entity by ID
+                            try:
+                                print(f"DEBUG: Strategy 1: Trying get_entity for ID: {user_id_value}")
+                                entity = await client.get_entity(user_id_value)
+                                from telethon.tl.types import InputPeerUser
+                                if hasattr(entity, 'access_hash') and entity.access_hash:
+                                    target = InputPeerUser(user_id=entity.id, access_hash=entity.access_hash)
+                                    method_used = "get_entity_user_id"
+                                    user_entity_cache[cache_key] = target
+                                    print(f"DEBUG: ✓ Found user via get_entity (ID): {user_id_value} (cached)")
+                            except Exception as e:
+                                print(f"DEBUG: get_entity (ID) failed: {e}")
                             
-                            # If user exists but no access_hash, it might still be sendable
-                            # Try to use the user_id directly
-                            if hasattr(user_obj, 'id') and user_obj.id:
-                                print(f"DEBUG: User exists (id={user_obj.id}) but no access_hash, will try direct send")
-                                # Don't set target here, let it fall through to other strategies
-                    else:
-                        print(f"DEBUG: GetUsersRequest returned empty result or failed")
-                except Exception as e:
-                    print(f"DEBUG: GetUsersRequest failed: {e} (type: {type(e)})")
-                    import traceback
-                    print(f"DEBUG: GetUsersRequest traceback: {traceback.format_exc()}")
+                            # Strategy 2: Try GetUsersRequest
+                            if not target:
+                                try:
+                                    from telethon.tl.functions.users import GetUsersRequest
+                                    from telethon.tl.types import InputPeerUser
+                                    print(f"DEBUG: Strategy 2: Trying GetUsersRequest for ID: {user_id_value}")
+                                    users_result = await client(GetUsersRequest([user_id_value]))
+                                    if users_result and len(users_result) > 0:
+                                        user_obj = users_result[0]
+                                        print(f"DEBUG: GetUsersRequest succeeded: user_id={user_obj.id}, min={getattr(user_obj, 'min', False)}, deleted={getattr(user_obj, 'deleted', False)}")
+                                        
+                                        # Check if user is deleted or empty
+                                        if hasattr(user_obj, 'deleted') and user_obj.deleted:
+                                            print(f"DEBUG: ❌ User account is deleted")
+                                            await client.disconnect()
+                                            return False, f'User account is deleted (user_id: {user_id_value})'
+                                        
+                                        if hasattr(user_obj, 'min') and user_obj.min:
+                                            print(f"DEBUG: ❌ User is empty (min=True)")
+                                            await client.disconnect()
+                                            return False, f'User is empty or not accessible (user_id: {user_id_value}, min=True)'
+                                        
+                                        if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
+                                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                                            method_used = "GetUsersRequest"
+                                            user_entity_cache[cache_key] = target
+                                            print(f"DEBUG: ✓ Got access_hash via GetUsersRequest for ID: {user_id_value} (cached)")
+                                except Exception as e:
+                                    print(f"DEBUG: GetUsersRequest failed: {e}")
+                    except (ValueError, TypeError) as conv_error:
+                        print(f"DEBUG: ERROR: Cannot convert user_id to int: '{user_id_str}': {conv_error}")
             
-            # Strategy 3: Try ResolveUsernameRequest if username is available
-            if not target and user.get('username'):
-                try:
-                    from telethon.tl.functions.contacts import ResolveUsernameRequest
-                    from telethon.tl.types import InputPeerUser
-                    username = user.get('username').strip().lstrip('@')
-                    print(f"DEBUG: Strategy 3: Trying ResolveUsernameRequest for username: {username}")
-                    resolved = await client(ResolveUsernameRequest(username))
-                    if resolved and hasattr(resolved, 'users') and len(resolved.users) > 0:
-                        user_obj = resolved.users[0]
-                        if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
-                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                            method_used = "ResolveUsernameRequest"
-                            # Cache successful resolution by both ID and username
-                            user_entity_cache[cache_key] = target
-                            if username:
-                                user_entity_cache[f"username:{username}"] = target
-                            print(f"DEBUG: ✓ Got access_hash via ResolveUsernameRequest for username: {username} (cached)")
-                except Exception as e:
-                    print(f"DEBUG: ResolveUsernameRequest failed: {e}")
-            
-            # Strategy 4: Try GetFullUserRequest as last resort
-            if not target:
-                try:
-                    from telethon.tl.functions.users import GetFullUserRequest
-                    from telethon.tl.types import InputPeerUser, InputUser
-                    print(f"DEBUG: Strategy 4: Trying GetFullUserRequest for ID: {user_id_value}")
-                    # Try with InputUser (access_hash=0 might work for some cases)
-                    try:
-                        input_user = InputUser(user_id=user_id_value, access_hash=0)
-                        full_user = await client(GetFullUserRequest(input_user))
-                        if full_user and hasattr(full_user, 'full_user') and hasattr(full_user.full_user, 'id'):
-                            # GetFullUserRequest doesn't return access_hash directly, but we can try to use the user
-                            print(f"DEBUG: GetFullUserRequest succeeded but doesn't provide access_hash")
-                    except Exception as e:
-                        print(f"DEBUG: GetFullUserRequest failed: {e}")
-                except Exception as e:
-                    print(f"DEBUG: GetFullUserRequest exception: {e}")
-            
-            # Strategy 5: Last resort - try direct send with user_id (sometimes works for known users)
-            if not target:
-                print(f"DEBUG: Strategy 5: Trying direct send with user_id as last resort: {user_id_value}")
-                # Try to send directly - sometimes Telethon can resolve it automatically
-                # This is a fallback that might work if user was previously contacted
-                try:
-                    # Test if we can send by trying a minimal operation first
-                    # Actually, let's just try sending - if it fails, we'll catch the error
-                    target = user_id_value
-                    method_used = "direct_user_id_fallback"
-                    print(f"DEBUG: Using direct user_id as fallback (may fail if access_hash required)")
-                except Exception as e:
-                    print(f"DEBUG: Direct user_id fallback setup failed: {e}")
-            
-            # Strategy 6: Try InputPeerUser with access_hash=0 for spam/outreach
-            # This is specifically for sending to unknown users with correct API credentials
-            # IMPORTANT: This requires API credentials from my.telegram.org that allow messaging unknown users
-            if not target:
-                try:
-                    from telethon.tl.types import InputPeerUser
-                    print(f"DEBUG: Strategy 6: Trying InputPeerUser with access_hash=0 for ID: {user_id_value} (type: {type(user_id_value)})")
-                    print(f"DEBUG: This is for spam/outreach to unknown users")
-                    print(f"DEBUG: Using API credentials: api_id={account_api_id}, api_hash={account_api_hash[:10]}...")
-                    print(f"DEBUG: NOTE: For this to work, API credentials must be from my.telegram.org and allow messaging unknown users")
-                    # CRITICAL: Ensure user_id_value is int for InputPeerUser
-                    if not isinstance(user_id_value, int):
-                        print(f"DEBUG: WARNING: user_id_value is not int in InputPeerUser! Converting...")
-                        user_id_value = int(user_id_value)
-                    # Try to create InputPeerUser with access_hash=0
-                    # This sometimes works if API credentials are correct and user privacy allows
-                    target = InputPeerUser(user_id=user_id_value, access_hash=0)
-                    method_used = "InputPeerUser_access_hash_0"
-                    print(f"DEBUG: Using InputPeerUser(user_id={user_id_value}, access_hash=0) for direct send")
-                    print(f"DEBUG: If this fails, ensure API credentials are correct and allow messaging unknown users")
-                except Exception as e:
-                    print(f"DEBUG: InputPeerUser(access_hash=0) setup failed: {e}")
-            
-            # Strategy 7: Last resort - try InputUser with access_hash=0 and get_entity
-            # Sometimes this works if the user was previously contacted
-            if not target:
-                try:
-                    from telethon.tl.types import InputUser, InputPeerUser
-                    print(f"DEBUG: Strategy 7: Trying InputUser with access_hash=0 for ID: {user_id_value} (type: {type(user_id_value)})")
-                    # CRITICAL: Ensure user_id_value is int for InputUser
-                    if not isinstance(user_id_value, int):
-                        print(f"DEBUG: WARNING: user_id_value is not int in InputUser! Converting...")
-                        user_id_value = int(user_id_value)
-                    # Try to create InputUser with access_hash=0
-                    input_user = InputUser(user_id=user_id_value, access_hash=0)
-                    # Try to get entity using this InputUser
-                    try:
-                        entity = await client.get_entity(input_user)
-                        if hasattr(entity, 'access_hash') and entity.access_hash:
-                            target = InputPeerUser(user_id=entity.id, access_hash=entity.access_hash)
-                            method_used = "InputUser_access_hash_0"
-                            user_entity_cache[cache_key] = target
-                            print(f"DEBUG: ✓ Got access_hash via InputUser(access_hash=0) for ID: {user_id_value} (cached)")
-                    except Exception as e:
-                        print(f"DEBUG: InputUser(access_hash=0) get_entity failed: {e}")
-                        # Still try to use it directly as last resort
-                        target = user_id_value
-                        method_used = "direct_user_id_last_resort"
-                        print(f"DEBUG: Using direct user_id as absolute last resort")
-                except Exception as e:
-                    print(f"DEBUG: InputUser(access_hash=0) setup failed: {e}")
+            print(f"DEBUG: ===== END USER RESOLUTION =====")
             
             # If still no target, we cannot send - need access_hash
             if not target:
@@ -526,19 +352,22 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 username_display = user.get("username", "not provided")
                 phone_display = user.get("phone", "not provided")
                 
-                error_msg = f'User not accessible: {user_id_display}'
+                error_msg = f'User not accessible'
+                if username:
+                    error_msg += f': {username}'
+                elif user_id_display != "unknown":
+                    error_msg += f': {user_id_display}'
+                
                 error_msg += f'\n\nUser details: ID={user_id_display}, Username={username_display}, Phone={phone_display}'
                 error_msg += f'\n\nAll resolution methods failed:'
-                error_msg += f'\n  1. get_entity(user_id) - User not in contacts or never contacted'
-                error_msg += f'\n  2. GetUsersRequest([user_id]) - User not accessible via API'
-                if user.get('username'):
-                    error_msg += f'\n  3. ResolveUsernameRequest(username={user.get("username")}) - Username resolution failed'
+                if username:
+                    error_msg += f'\n  1. ResolveUsernameRequest(username={username}) - Username resolution failed'
+                    error_msg += f'\n  2. get_entity(username={username}) - User not accessible'
+                if raw_user_id:
+                    error_msg += f'\n  3. get_entity(user_id={raw_user_id}) - User not in contacts or never contacted'
+                    error_msg += f'\n  4. GetUsersRequest([user_id={raw_user_id}]) - User not accessible via API'
                 else:
-                    error_msg += f'\n  3. ResolveUsernameRequest - Skipped (no username provided)'
-                error_msg += f'\n  4. GetFullUserRequest - Failed to get user details'
-                error_msg += f'\n  5. Direct user_id send - Requires access_hash'
-                error_msg += f'\n  6. InputPeerUser(access_hash=0) - Failed (may need correct API credentials)'
-                error_msg += f'\n  7. InputUser(access_hash=0) - User not previously contacted'
+                    error_msg += f'\n  3-4. User ID methods - Skipped (no user_id provided)'
                 error_msg += f'\n\nPossible reasons:'
                 error_msg += f'\n  • User has privacy settings that block messages from unknown users'
                 error_msg += f'\n  • User was never contacted by this account before'
@@ -556,8 +385,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 error_msg += f'\n  3. Try re-creating session with correct API credentials from my.telegram.org'
                 error_msg += f'\n  4. Ask the user to add your account to their contacts first'
                 error_msg += f'\n  5. Send a message to this user manually from the Telegram app using account {account.get("phone")}'
-                error_msg += f'\n  6. If username is available, try using it instead of user_id'
-                error_msg += f'\n  7. Check if the user account is active and not restricted'
+                error_msg += f'\n  6. Check if the user account is active and not restricted'
                 
                 return False, error_msg
 
@@ -589,56 +417,15 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 
             except (ValueError, TypeError) as ve:
                 error_str = str(ve)
-                # Check for invalid Peer errors - if we tried direct send, maybe we can still get access_hash
+                # Check for invalid Peer errors
                 if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
-                    print(f"DEBUG: Invalid Peer error with method {method_used}, trying alternative approaches: {error_str}")
-                    # If we used direct_user_id_fallback, try one more time with GetUsersRequest using different approach
-                    if method_used == "direct_user_id_fallback":
-                        try:
-                            from telethon.tl.functions.users import GetUsersRequest
-                            from telethon.tl.types import InputPeerUser
-                            print(f"DEBUG: Retry: Trying GetUsersRequest with plain int for ID: {user_id_value} (type: {type(user_id_value)})")
-                            # CRITICAL: Ensure user_id_value is int, not string
-                            if not isinstance(user_id_value, int):
-                                print(f"DEBUG: WARNING: user_id_value is not int in retry GetUsersRequest! Converting...")
-                                user_id_value = int(user_id_value)
-                            # Try with plain int (not InputUser)
-                            users_result = await client(GetUsersRequest([user_id_value]))
-                            if users_result and len(users_result) > 0:
-                                user_obj = users_result[0]
-                                if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
-                                    target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                                    method_used = "GetUsersRequest_retry"
-                                    user_entity_cache[cache_key] = target
-                                    print(f"DEBUG: ✓ Got access_hash on retry via GetUsersRequest for ID: {user_id_value}")
-                                    
-                                    # Retry send with proper entity
-                                    if media_path and media_type:
-                                        media_file = Path(media_path)
-                                        if media_file.exists():
-                                            if media_type == 'photo':
-                                                await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                                            elif media_type == 'video':
-                                                await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                                            elif media_type == 'audio':
-                                                await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                                        else:
-                                            await client.send_message(target, message_text, parse_mode='html')
-                                    else:
-                                        await client.send_message(target, message_text, parse_mode='html')
-                                    
-                                    print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
-                                    await client.disconnect()
-                                    return True, None
-                        except Exception as retry_e:
-                            print(f"DEBUG: Retry GetUsersRequest also failed: {retry_e}")
-                    
+                    print(f"DEBUG: Invalid Peer error with method {method_used}: {error_str}")
                     await client.disconnect()
-                    return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
+                    return False, f'Invalid Peer error - user may not be accessible or may have privacy restrictions. Error: {error_str}'
                 # Check for InputUserEmpty or similar errors
                 elif "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
                     print(f"DEBUG: Entity error with method {method_used}: {error_str}")
-                    print(f"DEBUG: User ID: {user_id_value}, Username: {user.get('username')}, Phone: {user.get('phone')}")
+                    print(f"DEBUG: User ID: {raw_user_id}, Username: {username}, Phone: {user.get('phone')}")
                     await client.disconnect()
                     
                     # Create a more user-friendly error message
