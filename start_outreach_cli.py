@@ -16,6 +16,16 @@ os.environ['USE_MOCK_STORAGE'] = 'true'
 from mock_sheets import sheets_manager
 
 
+def safe_input(prompt=""):
+    """Input with UTF-8 encoding fix for terminal issues"""
+    try:
+        return input(prompt)
+    except UnicodeDecodeError:
+        # Fix encoding for terminals that don't use UTF-8
+        sys.stdin.reconfigure(encoding='utf-8', errors='replace')
+        return input(prompt)
+
+
 def print_header(text):
     print("\n" + "=" * 60)
     print(f"  {text}")
@@ -167,7 +177,7 @@ async def run_outreach(message_text=None, delay_min=30, delay_max=90, max_messag
 
         lines = []
         while True:
-            line = input()
+            line = safe_input()
             if not line and lines:
                 break
             lines.append(line)
@@ -186,7 +196,7 @@ async def run_outreach(message_text=None, delay_min=30, delay_max=90, max_messag
 
     # Confirm
     if not dry_run:
-        confirm = input("Start outreach? (yes/no): ").strip().lower()
+        confirm = safe_input("Start outreach? (yes/no): ").strip().lower()
         if confirm != 'yes':
             print_info("Cancelled")
             return False
@@ -352,7 +362,7 @@ async def main():
     print("4. Dry run (test without sending)")
     print()
 
-    choice = input("Select (1-4): ").strip()
+    choice = safe_input("Select (1-4): ").strip()
 
     if choice == "1":
         await run_outreach()
@@ -362,7 +372,7 @@ async def main():
     elif choice == "3":
         show_stats()
     elif choice == "4":
-        max_msg = int(input("How many users to test? (default 3): ").strip() or "3")
+        max_msg = int(safe_input("How many users to test? (default 3): ").strip() or "3")
         await run_outreach(dry_run=True, max_messages=max_msg)
     else:
         print_error("Invalid choice")
