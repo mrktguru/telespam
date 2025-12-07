@@ -154,8 +154,38 @@ async def run_outreach(message_text=None, delay_min=30, delay_max=90, max_messag
 
     print_success(f"Found {len(accounts)} available account(s)")
 
-    for acc in accounts:
-        print_info(f"  - {acc['id']}: {acc['phone']} (sent today: {acc.get('daily_sent', 0)})")
+    # Let user select account
+    print()
+    print("Available accounts:")
+    for i, acc in enumerate(accounts, 1):
+        print_info(f"  {i}. {acc['phone']} (sent today: {acc.get('daily_sent', 0)})")
+
+    print()
+    if len(accounts) > 1:
+        account_choice = safe_input(f"Select account (1-{len(accounts)}) or 'all' for round-robin [all]: ").strip().lower()
+    else:
+        account_choice = "1"
+        print_info(f"Using only account: {accounts[0]['phone']}")
+
+    # Filter selected account(s)
+    selected_accounts = []
+    if account_choice == '' or account_choice == 'all':
+        selected_accounts = accounts
+        print_success(f"Using all {len(accounts)} account(s) in round-robin mode")
+    else:
+        try:
+            account_index = int(account_choice) - 1
+            if 0 <= account_index < len(accounts):
+                selected_accounts = [accounts[account_index]]
+                print_success(f"Using account: {selected_accounts[0]['phone']}")
+            else:
+                print_error("Invalid account number!")
+                return False
+        except ValueError:
+            print_error("Invalid input!")
+            return False
+
+    print()
 
     # Get users
     users = sheets_manager.get_pending_users(limit=100)
@@ -218,8 +248,8 @@ async def run_outreach(message_text=None, delay_min=30, delay_max=90, max_messag
     account_index = 0
 
     for i, user in enumerate(users, 1):
-        # Select account (round-robin)
-        account = accounts[account_index % len(accounts)]
+        # Select account (round-robin or single)
+        account = selected_accounts[account_index % len(selected_accounts)]
 
         username = f"@{user.get('username')}" if user.get('username') else ""
         user_id = user.get('user_id', 0)
