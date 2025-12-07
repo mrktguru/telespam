@@ -137,43 +137,68 @@ async def send_message(
                     "error": "No file provided for media message"
                 }
 
+        # Resolve user entity first (required for Telethon to work properly)
+        try:
+            target_entity = await client.get_entity(user_id)
+            print(f"DEBUG: ✓ Resolved user ID {user_id} to entity: {target_entity.first_name if hasattr(target_entity, 'first_name') else 'User'}")
+        except Exception as e:
+            # If get_entity fails, try InputPeer methods
+            print(f"DEBUG: get_entity failed for ID {user_id}: {e}, trying alternative methods...")
+            try:
+                from telethon.tl.functions.users import GetUsersRequest
+                from telethon.tl.types import InputPeerUser
+
+                # Try GetUsersRequest to get access_hash
+                users_result = await client(GetUsersRequest([user_id]))
+                if users_result and len(users_result) > 0:
+                    user_obj = users_result[0]
+                    target_entity = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                    print(f"DEBUG: ✓ Resolved user ID {user_id} using GetUsersRequest")
+                else:
+                    # Last resort: try to use user_id directly (will likely fail)
+                    print(f"DEBUG: ⚠ Could not resolve user ID {user_id}, attempting direct send...")
+                    target_entity = user_id
+            except Exception as e2:
+                print(f"DEBUG: ⚠ All resolution methods failed for ID {user_id}: {e2}")
+                target_entity = user_id  # Will likely fail, but let Telethon give the error
+
         # Send message based on type
         sent_message = None
 
         if message_type == config.MessageType.TEXT:
-            sent_message = await client.send_message(user_id, content)
+            sent_message = await client.send_message(target_entity, content)
 
         elif message_type == config.MessageType.PHOTO:
             sent_message = await client.send_file(
-                user_id,
+                target_entity,
                 file_to_send,
                 caption=caption
             )
 
         elif message_type == config.MessageType.VIDEO_NOTE:
             sent_message = await client.send_file(
-                user_id,
+                target_entity,
                 file_to_send,
                 video_note=True
             )
 
         elif message_type == config.MessageType.VOICE:
             sent_message = await client.send_file(
-                user_id,
+                target_entity,
                 file_to_send,
                 voice_note=True
             )
 
         elif message_type == config.MessageType.VIDEO:
             sent_message = await client.send_file(
-                user_id,
+                target_entity,
                 file_to_send,
                 caption=caption
             )
 
         elif message_type == config.MessageType.DOCUMENT:
             sent_message = await client.send_file(
-                user_id,
+                target_entity,
                 file_to_send,
                 caption=caption,
                 force_document=True,
