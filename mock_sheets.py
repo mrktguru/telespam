@@ -186,7 +186,7 @@ class MockSheetsManager:
             if status not in ['active', 'warming']:
                 continue
 
-            daily_sent = int(account.get('daily_sent', 0))
+            daily_sent = int(account.get('daily_sent') or 0)
             max_daily = config.MAX_DAILY_ACTIVE if status == 'active' else config.MAX_DAILY_WARMING
 
             if daily_sent >= max_daily:
@@ -199,7 +199,7 @@ class MockSheetsManager:
             available.append(account)
 
         # Sort by daily_sent
-        available.sort(key=lambda x: x.get('daily_sent', 0))
+        available.sort(key=lambda x: int(x.get('daily_sent') or 0))
         return available[:limit]
 
     # Settings operations

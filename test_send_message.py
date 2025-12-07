@@ -171,7 +171,7 @@ async def send_test_message():
                 print("Enter your message (press Enter twice to finish):")
                 lines = []
                 while True:
-                    line = safe_input()
+                    line = safe_input("")
                     if not line and lines:
                         break
                     lines.append(line)

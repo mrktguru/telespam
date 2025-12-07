@@ -4,6 +4,7 @@ from typing import Dict, Optional
 from pathlib import Path
 import aiohttp
 import base64
+import os
 from telethon.errors import (
     FloodWaitError,
     UserBannedInChannelError,
@@ -11,13 +12,25 @@ from telethon.errors import (
     PeerIdInvalidError
 )
 import config
-from database import db
 from proxy import get_client, get_proxy_config
-from accounts import (
-    select_account_for_user,
-    increment_account_usage,
-    set_account_cooldown
-)
+
+# Use mock storage if specified in environment
+if os.getenv('USE_MOCK_STORAGE', 'false').lower() == 'true':
+    from mock_sheets import sheets_manager
+    # For mock storage, we need to use sheets_manager methods directly
+    # since accounts.py uses database
+    db = None
+    select_account_for_user = None
+    increment_account_usage = None
+    set_account_cooldown = None
+else:
+    from database import db
+    from sheets_loader import sheets_manager  # Will be DummySheetsManager but not used
+    from accounts import (
+        select_account_for_user,
+        increment_account_usage,
+        set_account_cooldown
+    )
 
 
 async def download_file(url: str, destination: Path) -> bool:
@@ -79,7 +92,16 @@ async def send_message(
 
     try:
         # Select account
-        selected_account = await select_account_for_user(user_id, account_id)
+        if select_account_for_user:
+            # Database mode
+            selected_account = await select_account_for_user(user_id, account_id)
+        else:
+            # Mock storage mode
+            if account_id:
+                selected_account = sheets_manager.get_account(account_id)
+            else:
+                available_accounts = sheets_manager.get_available_accounts(limit=1)
+                selected_account = available_accounts[0] if available_accounts else None
 
         if not selected_account:
             return {
@@ -210,7 +232,17 @@ async def send_message(
             Path(file_to_send).unlink(missing_ok=True)
 
         # Update account usage
-        increment_account_usage(selected_account['id'])
+        if increment_account_usage:
+            # Database mode
+            increment_account_usage(selected_account['id'])
+        else:
+            # Mock storage mode - increment manually
+            daily_sent = int(selected_account.get('daily_sent') or 0) + 1
+            total_sent = int(selected_account.get('total_sent') or 0) + 1
+            sheets_manager.update_account(selected_account['id'], {
+                'daily_sent': daily_sent,
+                'total_sent': total_sent
+            })
 
         # Log success
         sheets_manager.add_log({
@@ -236,7 +268,20 @@ async def send_message(
     except FloodWaitError as e:
         # Flood wait error - set account to cooldown
         if selected_account:
-            set_account_cooldown(selected_account['id'], hours=e.seconds // 3600 + 1)
+            hours = e.seconds // 3600 + 1
+            if set_account_cooldown:
+                # Database mode
+                set_account_cooldown(selected_account['id'], hours=hours)
+            else:
+                # Mock storage mode - set cooldown manually
+                from datetime import datetime, timedelta
+                cooldown_until = datetime.now() + timedelta(hours=hours)
+                flood_count = int(selected_account.get('flood_count') or 0) + 1
+                sheets_manager.update_account(selected_account['id'], {
+                    'status': 'cooldown',
+                    'cooldown_until': cooldown_until.isoformat(),
+                    'flood_count': flood_count
+                })
 
             sheets_manager.add_log({
                 "account_id": selected_account['id'],
