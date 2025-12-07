@@ -199,6 +199,42 @@ async def add_account_from_session_data():
         if not await client.is_user_authorized():
             print("❌ Session is not authorized!")
             print("   The AUTH KEY may be invalid or expired")
+            print()
+            print("   If this account has 2FA enabled, you can try manual sign-in:")
+            print("   (Leave blank to skip)")
+            print()
+            
+            # Allow manual 2FA sign-in as fallback
+            try_2fa = input("Try 2FA sign-in? (y/N): ").strip().lower()
+            
+            if try_2fa == 'y':
+                from telethon.errors import SessionPasswordNeededError
+                
+                password = input("Enter your 2FA password (default: 7007): ").strip()
+                if not password:
+                    password = "7007"  # Default password
+                
+                try:
+                    await client.sign_in(password=password)
+                    print("✅ Successfully signed in with 2FA password!")
+                except SessionPasswordNeededError:
+                    print("❌ 2FA password required but sign-in failed")
+                    await client.disconnect()
+                    session_file.unlink()
+                    return 1
+                except Exception as e:
+                    print(f"❌ 2FA sign-in failed: {e}")
+                    await client.disconnect()
+                    session_file.unlink()
+                    return 1
+            else:
+                await client.disconnect()
+                session_file.unlink()
+                return 1
+        
+        # Check if still not authorized after 2FA attempt
+        if not await client.is_user_authorized():
+            print("❌ Session still not authorized after 2FA attempt")
             await client.disconnect()
             session_file.unlink()
             return 1
