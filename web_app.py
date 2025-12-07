@@ -248,10 +248,20 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                         from telethon.tl.functions.contacts import ResolveUsernameRequest
                         from telethon.tl.types import InputPeerUser
                         print(f"DEBUG: Strategy 1: Trying ResolveUsernameRequest for username: {username}")
+                        print(f"DEBUG: Account API ID: {account_api_id}, API Hash: {account_api_hash[:10]}...")
                         resolved = await client(ResolveUsernameRequest(username))
+                        print(f"DEBUG: ResolveUsernameRequest response: {type(resolved)}")
+                        if resolved:
+                            print(f"DEBUG: ResolveUsernameRequest has 'users' attr: {hasattr(resolved, 'users')}")
+                            if hasattr(resolved, 'users'):
+                                print(f"DEBUG: ResolveUsernameRequest users count: {len(resolved.users) if resolved.users else 0}")
+                            if hasattr(resolved, 'chats'):
+                                print(f"DEBUG: ResolveUsernameRequest chats count: {len(resolved.chats) if resolved.chats else 0}")
+                        
                         if resolved and hasattr(resolved, 'users') and len(resolved.users) > 0:
                             user_obj = resolved.users[0]
                             print(f"DEBUG: ResolveUsernameRequest succeeded: user_id={user_obj.id}, username={getattr(user_obj, 'username', 'N/A')}")
+                            print(f"DEBUG: User object type: {type(user_obj)}, class: {user_obj.__class__.__name__}")
                             
                             # Check if user is deleted or empty
                             if hasattr(user_obj, 'deleted') and user_obj.deleted:
@@ -274,18 +284,39 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                 print(f"DEBUG: ✓ Got access_hash via ResolveUsernameRequest for username: {username} (cached)")
                             else:
                                 print(f"DEBUG: ⚠ ResolveUsernameRequest returned user but no access_hash")
+                                print(f"DEBUG: User object attributes: {[attr for attr in dir(user_obj) if not attr.startswith('_')]}")
+                        elif resolved and hasattr(resolved, 'chats') and len(resolved.chats) > 0:
+                            print(f"DEBUG: ⚠ ResolveUsernameRequest returned chat instead of user (username might be a channel/group)")
+                            await client.disconnect()
+                            return False, f'Username {username} is a channel or group, not a user'
                         else:
-                            print(f"DEBUG: ResolveUsernameRequest returned empty result")
-                    except Exception as e:
+                            print(f"DEBUG: ResolveUsernameRequest returned empty result or no users")
+                            print(f"DEBUG: Response type: {type(resolved)}, attributes: {[attr for attr in dir(resolved) if not attr.startswith('_')]}")
+            except Exception as e:
                         print(f"DEBUG: ResolveUsernameRequest failed: {e}")
+                        print(f"DEBUG: Exception type: {type(e)}")
+                        import traceback
+                        print(f"DEBUG: ResolveUsernameRequest traceback: {traceback.format_exc()}")
                     
                     # Strategy 2: Try get_entity by username (if ResolveUsernameRequest failed)
                     if not target:
                         try:
                             print(f"DEBUG: Strategy 2: Trying get_entity for username: {username}")
-                            entity = await client.get_entity(username)
+                            # Try with @ prefix
+                            username_with_at = f"@{username}" if not username.startswith('@') else username
+                            print(f"DEBUG: Trying get_entity with: {username_with_at}")
+                            entity = await client.get_entity(username_with_at)
+                            print(f"DEBUG: get_entity succeeded: entity type={type(entity)}, id={getattr(entity, 'id', 'N/A')}")
+                            
+                            # Check if it's actually a user (not a channel/group)
+                            from telethon.tl.types import User, Channel, Chat
+                            if isinstance(entity, Channel) or isinstance(entity, Chat):
+                                print(f"DEBUG: ⚠ Entity is a channel/chat, not a user")
+                                await client.disconnect()
+                                return False, f'Username {username} is a channel or group, not a user'
+                            
                             from telethon.tl.types import InputPeerUser
-                            if hasattr(entity, 'access_hash') and entity.access_hash:
+                            if isinstance(entity, User) and hasattr(entity, 'access_hash') and entity.access_hash:
                                 target = InputPeerUser(user_id=entity.id, access_hash=entity.access_hash)
                                 method_used = "get_entity_username"
                                 # Cache successful resolution
@@ -293,8 +324,27 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                 if entity.id:
                                     user_entity_cache[f"{entity.id}"] = target
                                 print(f"DEBUG: ✓ Found user via get_entity (username): {username} (cached)")
-                        except Exception as e:
+                            else:
+                                print(f"DEBUG: ⚠ get_entity returned entity but no access_hash or not a User")
+                                print(f"DEBUG: Entity type: {type(entity)}, attributes: {[attr for attr in dir(entity) if not attr.startswith('_')]}")
+            except Exception as e:
                             print(f"DEBUG: get_entity (username) failed: {e}")
+                            print(f"DEBUG: Exception type: {type(e)}")
+                            import traceback
+                            print(f"DEBUG: get_entity traceback: {traceback.format_exc()}")
+                    
+                    # Strategy 3: Try direct send with username (sometimes works even without access_hash)
+                    if not target:
+                        try:
+                            print(f"DEBUG: Strategy 3: Trying direct send with username: {username}")
+                            # Try to send directly using username - Telethon might resolve it automatically
+                            # This is a last resort that sometimes works
+                            username_with_at = f"@{username}" if not username.startswith('@') else username
+                            target = username_with_at
+                            method_used = "direct_username_send"
+                            print(f"DEBUG: Using username directly for send (may fail if access_hash required): {username_with_at}")
+            except Exception as e:
+                            print(f"DEBUG: Direct username send setup failed: {e}")
             
             # PRIORITY 2: Try user_id (if username not available or failed)
             if not target and raw_user_id:
@@ -327,11 +377,11 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                     method_used = "get_entity_user_id"
                                     user_entity_cache[cache_key] = target
                                     print(f"DEBUG: ✓ Found user via get_entity (ID): {user_id_value} (cached)")
-                            except Exception as e:
+            except Exception as e:
                                 print(f"DEBUG: get_entity (ID) failed: {e}")
-                            
+
                             # Strategy 2: Try GetUsersRequest
-                            if not target:
+        if not target:
                                 try:
                                     from telethon.tl.functions.users import GetUsersRequest
                                     from telethon.tl.types import InputPeerUser
@@ -344,7 +394,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                         # Check if user is deleted or empty
                                         if hasattr(user_obj, 'deleted') and user_obj.deleted:
                                             print(f"DEBUG: ❌ User account is deleted")
-                                            await client.disconnect()
+            await client.disconnect()
                                             return False, f'User account is deleted (user_id: {user_id_value})'
                                         
                                         if hasattr(user_obj, 'min') and user_obj.min:
@@ -409,30 +459,30 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 
                 return False, error_msg
 
-            # Send message with or without media, using HTML parsing
+        # Send message with or without media, using HTML parsing
             try:
-                if media_path and media_type:
-                    media_file = Path(media_path)
-                    if media_file.exists():
-                        print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+        if media_path and media_type:
+            media_file = Path(media_path)
+            if media_file.exists():
+                print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
                         # Send with media
-                        if media_type == 'photo':
-                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                        elif media_type == 'video':
-                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                        elif media_type == 'audio':
-                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    else:
-                        print(f"DEBUG: Media file not found: {media_path}")
-                        # File doesn't exist, send text only
-                        await client.send_message(target, message_text, parse_mode='html')
-                else:
-                    # Send text only with HTML formatting
-                    await client.send_message(target, message_text, parse_mode='html')
-                
+                if media_type == 'photo':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'video':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                elif media_type == 'audio':
+                    await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+            else:
+                print(f"DEBUG: Media file not found: {media_path}")
+                # File doesn't exist, send text only
+                await client.send_message(target, message_text, parse_mode='html')
+        else:
+            # Send text only with HTML formatting
+            await client.send_message(target, message_text, parse_mode='html')
+            
                 # Log successful method
                 print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
-                await client.disconnect()
+        await client.disconnect()
                 return True, None
                 
             except (ValueError, TypeError) as ve:
@@ -480,7 +530,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                     raise
             
             await client.disconnect()
-            return True, None
+        return True, None
         except (ValueError, TypeError) as e:
             error_str = str(e)
             await client.disconnect()
@@ -501,7 +551,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         error_str = str(e)
         # Check for invalid Peer errors
         if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
-            await client.disconnect()
+        await client.disconnect()
             return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
         # Check for InputUserEmpty or similar errors
         elif "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
@@ -880,9 +930,9 @@ def run_campaign_task(campaign_id):
             db.add_campaign_log(campaign_id, f'Campaign stopped: {sent_count} sent, {failed_count} failed', level='warning')
             db.update_campaign(campaign_id, status='stopped')
         else:
-            # Mark as completed
-            db.update_campaign(campaign_id, status='completed')
-            db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
+        # Mark as completed
+        db.update_campaign(campaign_id, status='completed')
+        db.add_campaign_log(campaign_id, f'Campaign completed: {sent_count} sent, {failed_count} failed', level='info')
     except Exception as e:
         db.add_campaign_log(campaign_id, f'Campaign error: {str(e)}', level='error')
         db.update_campaign(campaign_id, status='failed')
@@ -1113,15 +1163,15 @@ def new_campaign():
             account = next((acc for acc in all_accounts if acc.get('phone') == phone), None)
             if account:
                 account_id = account.get('id')
-                # Generate new ID: acc_{phone}_{campaign_id}
+                    # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
-                new_account_id = f"acc_{phone_clean}_{campaign_id}"
-                
-                # Update account with new ID and campaign_id
+                    new_account_id = f"acc_{phone_clean}_{campaign_id}"
+                    
+                    # Update account with new ID and campaign_id
                 update_account(account_id, {
-                    'new_id': new_account_id,
-                    'campaign_id': campaign_id
-                })
+                        'new_id': new_account_id,
+                        'campaign_id': campaign_id
+                    })
         flash('Campaign created! Starting...', 'success')
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
 
@@ -1600,7 +1650,7 @@ def accounts_list():
             acc_id = acc.get('id', '')
             if acc_id:
                 stats = rate_limiter.get_stats(acc_id)
-                acc['rate_limits'] = stats
+        acc['rate_limits'] = stats
             else:
                 acc['rate_limits'] = None
         except Exception as e:
