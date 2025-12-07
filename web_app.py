@@ -343,7 +343,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             target = username_with_at
                             method_used = "direct_username_send"
                             print(f"DEBUG: Using username directly for send (may fail if access_hash required): {username_with_at}")
-            except Exception as e:
+                        except Exception as e:
                             print(f"DEBUG: Direct username send setup failed: {e}")
             
             # PRIORITY 2: Try user_id (if username not available or failed)
