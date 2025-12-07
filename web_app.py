@@ -482,10 +482,10 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 
                 # Log successful method
                 print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
-        await client.disconnect()
+                await client.disconnect()
                 return True, None
                 
-            except Exception as e:
+            except (ValueError, TypeError) as ve:
                 error_str = str(ve)
                 # Check for invalid Peer errors
                 if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
