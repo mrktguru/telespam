@@ -528,10 +528,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 else:
                     # Other ValueError/TypeError, re-raise
                     raise
-            
-            await client.disconnect()
-        return True, None
-        except (ValueError, TypeError) as e:
+        except Exception as e:
             error_str = str(e)
             await client.disconnect()
             return False, f'Invalid user_id format: {user.get("user_id")} - {error_str}'
