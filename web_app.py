@@ -394,7 +394,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                         # Check if user is deleted or empty
                                         if hasattr(user_obj, 'deleted') and user_obj.deleted:
                                             print(f"DEBUG: ❌ User account is deleted")
-            await client.disconnect()
+                                            await client.disconnect()
                                             return False, f'User account is deleted (user_id: {user_id_value})'
                                         
                                         if hasattr(user_obj, 'min') and user_obj.min:
