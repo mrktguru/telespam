@@ -3302,13 +3302,13 @@ def submit_registration_code():
                 
                 return {'success': True, 'message': 'Registration successful'}
                 
-                except Exception as e:
+            except PhoneCodeInvalidError:
                 return {'success': False, 'error': 'PhoneCodeInvalidError', 'message': 'Invalid verification code'}
-                except Exception as e:
+            except PhoneCodeExpiredError:
                 return {'success': False, 'error': 'PhoneCodeExpiredError', 'message': 'Code expired. Please request a new code.'}
-                except Exception as e:
+            except SessionPasswordNeededError:
                 return {'success': False, 'error': 'SessionPasswordNeededError', 'message': '2FA password required (not yet supported)'}
-                except Exception as e:
+            except Exception as e:
                 return {'success': False, 'error': str(e)}
         
         result = asyncio.run(sign_in())
