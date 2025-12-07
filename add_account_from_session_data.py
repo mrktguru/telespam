@@ -13,6 +13,9 @@ from datetime import datetime
 # Use database for accounts
 from database import db
 
+# Import config to use proper API credentials from .env
+import config
+
 
 async def create_session_file(session_path: str, auth_key: bytes, dc_id: int):
     """
@@ -41,11 +44,12 @@ async def create_session_file(session_path: str, auth_key: bytes, dc_id: int):
     server_address, port = dc_addresses[dc_id]
 
     # Create a temporary client to initialize the session structure
-    # Use Telegram Desktop's public API credentials
-    TELEGRAM_DESKTOP_API_ID = 611335
-    TELEGRAM_DESKTOP_API_HASH = "d524b414d21f4d37f08684c1df41ac9c"
-
-    temp_client = TelegramClient(session_path, api_id=TELEGRAM_DESKTOP_API_ID, api_hash=TELEGRAM_DESKTOP_API_HASH)
+    # IMPORTANT: Use API credentials from .env for spam/outreach functionality!
+    # Telegram Desktop credentials (611335) DON'T WORK for unknown users
+    if not config.API_ID or not config.API_HASH:
+        raise ValueError("API_ID and API_HASH must be set in .env file! Get them from https://my.telegram.org")
+    
+    temp_client = TelegramClient(session_path, api_id=config.API_ID, api_hash=config.API_HASH)
 
     # Don't connect, just create the session file structure
     # This will create the proper SQLite structure
@@ -179,15 +183,15 @@ async def add_account_from_session_data():
 
         from telethon import TelegramClient
 
-        # Use Telegram Desktop's public API credentials
-        # These are official and publicly known
-        TELEGRAM_DESKTOP_API_ID = 611335
-        TELEGRAM_DESKTOP_API_HASH = "d524b414d21f4d37f08684c1df41ac9c"
+        # IMPORTANT: Use API credentials from .env for spam/outreach functionality!
+        # Telegram Desktop credentials (611335) DON'T WORK for unknown users
+        if not config.API_ID or not config.API_HASH:
+            raise ValueError("API_ID and API_HASH must be set in .env file! Get them from https://my.telegram.org")
 
         client = TelegramClient(
             str(session_file.with_suffix('')),
-            api_id=TELEGRAM_DESKTOP_API_ID,
-            api_hash=TELEGRAM_DESKTOP_API_HASH
+            api_id=config.API_ID,
+            api_hash=config.API_HASH
         )
 
         await client.connect()
@@ -220,9 +224,10 @@ async def add_account_from_session_data():
 
         account_id = f"acc_{session_name}"
 
-        # Use Telegram Desktop credentials
-        TELEGRAM_DESKTOP_API_ID = 611335
-        TELEGRAM_DESKTOP_API_HASH = "d524b414d21f4d37f08684c1df41ac9c"
+        # IMPORTANT: Use API credentials from .env for spam/outreach functionality!
+        # These credentials are saved to database and used for all future operations
+        if not config.API_ID or not config.API_HASH:
+            raise ValueError("API_ID and API_HASH must be set in .env file! Get them from https://my.telegram.org")
 
         account_data = {
             'id': account_id,
@@ -232,8 +237,8 @@ async def add_account_from_session_data():
             'last_name': me.last_name or '',
             'user_id': me.id,
             'session_file': str(session_file),
-            'api_id': TELEGRAM_DESKTOP_API_ID,
-            'api_hash': TELEGRAM_DESKTOP_API_HASH,
+            'api_id': config.API_ID,
+            'api_hash': config.API_HASH,
             'status': 'warming',
             'daily_sent': 0,
             'total_sent': 0,
