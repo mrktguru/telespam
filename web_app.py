@@ -548,7 +548,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         error_str = str(e)
         # Check for invalid Peer errors
         if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
-        await client.disconnect()
+            await client.disconnect()
             return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
         # Check for InputUserEmpty or similar errors
         elif "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
