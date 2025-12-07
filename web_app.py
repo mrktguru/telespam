@@ -459,8 +459,8 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 
                 return False, error_msg
 
-        # Send message with or without media, using HTML parsing
-        try:
+            # Send message with or without media, using HTML parsing
+            try:
             if media_path and media_type:
                 media_file = Path(media_path)
                 if media_file.exists():
