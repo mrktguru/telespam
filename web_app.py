@@ -143,7 +143,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         if isinstance(account_api_id, str):
             try:
                 account_api_id = int(account_api_id)
-            except (ValueError, TypeError):
+            except Exception as e:
                 account_api_id = None
     
     # Fallback to config if account doesn't have API credentials
@@ -248,10 +248,20 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                         from telethon.tl.functions.contacts import ResolveUsernameRequest
                         from telethon.tl.types import InputPeerUser
                         print(f"DEBUG: Strategy 1: Trying ResolveUsernameRequest for username: {username}")
+                        print(f"DEBUG: Account API ID: {account_api_id}, API Hash: {account_api_hash[:10]}...")
                         resolved = await client(ResolveUsernameRequest(username))
+                        print(f"DEBUG: ResolveUsernameRequest response: {type(resolved)}")
+                        if resolved:
+                            print(f"DEBUG: ResolveUsernameRequest has 'users' attr: {hasattr(resolved, 'users')}")
+                            if hasattr(resolved, 'users'):
+                                print(f"DEBUG: ResolveUsernameRequest users count: {len(resolved.users) if resolved.users else 0}")
+                            if hasattr(resolved, 'chats'):
+                                print(f"DEBUG: ResolveUsernameRequest chats count: {len(resolved.chats) if resolved.chats else 0}")
+                        
                         if resolved and hasattr(resolved, 'users') and len(resolved.users) > 0:
                             user_obj = resolved.users[0]
                             print(f"DEBUG: ResolveUsernameRequest succeeded: user_id={user_obj.id}, username={getattr(user_obj, 'username', 'N/A')}")
+                            print(f"DEBUG: User object type: {type(user_obj)}, class: {user_obj.__class__.__name__}")
                             
                             # Check if user is deleted or empty
                             if hasattr(user_obj, 'deleted') and user_obj.deleted:
@@ -274,18 +284,39 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                 print(f"DEBUG: ✓ Got access_hash via ResolveUsernameRequest for username: {username} (cached)")
                             else:
                                 print(f"DEBUG: ⚠ ResolveUsernameRequest returned user but no access_hash")
+                                print(f"DEBUG: User object attributes: {[attr for attr in dir(user_obj) if not attr.startswith('_')]}")
+                        elif resolved and hasattr(resolved, 'chats') and len(resolved.chats) > 0:
+                            print(f"DEBUG: ⚠ ResolveUsernameRequest returned chat instead of user (username might be a channel/group)")
+                            await client.disconnect()
+                            return False, f'Username {username} is a channel or group, not a user'
                         else:
-                            print(f"DEBUG: ResolveUsernameRequest returned empty result")
+                            print(f"DEBUG: ResolveUsernameRequest returned empty result or no users")
+                            print(f"DEBUG: Response type: {type(resolved)}, attributes: {[attr for attr in dir(resolved) if not attr.startswith('_')]}")
                     except Exception as e:
                         print(f"DEBUG: ResolveUsernameRequest failed: {e}")
+                        print(f"DEBUG: Exception type: {type(e)}")
+                        import traceback
+                        print(f"DEBUG: ResolveUsernameRequest traceback: {traceback.format_exc()}")
                     
                     # Strategy 2: Try get_entity by username (if ResolveUsernameRequest failed)
                     if not target:
                         try:
                             print(f"DEBUG: Strategy 2: Trying get_entity for username: {username}")
-                            entity = await client.get_entity(username)
+                            # Try with @ prefix
+                            username_with_at = f"@{username}" if not username.startswith('@') else username
+                            print(f"DEBUG: Trying get_entity with: {username_with_at}")
+                            entity = await client.get_entity(username_with_at)
+                            print(f"DEBUG: get_entity succeeded: entity type={type(entity)}, id={getattr(entity, 'id', 'N/A')}")
+                            
+                            # Check if it's actually a user (not a channel/group)
+                            from telethon.tl.types import User, Channel, Chat
+                            if isinstance(entity, Channel) or isinstance(entity, Chat):
+                                print(f"DEBUG: ⚠ Entity is a channel/chat, not a user")
+                                await client.disconnect()
+                                return False, f'Username {username} is a channel or group, not a user'
+                            
                             from telethon.tl.types import InputPeerUser
-                            if hasattr(entity, 'access_hash') and entity.access_hash:
+                            if isinstance(entity, User) and hasattr(entity, 'access_hash') and entity.access_hash:
                                 target = InputPeerUser(user_id=entity.id, access_hash=entity.access_hash)
                                 method_used = "get_entity_username"
                                 # Cache successful resolution
@@ -293,8 +324,27 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                 if entity.id:
                                     user_entity_cache[f"{entity.id}"] = target
                                 print(f"DEBUG: ✓ Found user via get_entity (username): {username} (cached)")
+                            else:
+                                print(f"DEBUG: ⚠ get_entity returned entity but no access_hash or not a User")
+                                print(f"DEBUG: Entity type: {type(entity)}, attributes: {[attr for attr in dir(entity) if not attr.startswith('_')]}")
                         except Exception as e:
                             print(f"DEBUG: get_entity (username) failed: {e}")
+                            print(f"DEBUG: Exception type: {type(e)}")
+                            import traceback
+                            print(f"DEBUG: get_entity traceback: {traceback.format_exc()}")
+                    
+                    # Strategy 3: Try direct send with username (sometimes works even without access_hash)
+                    if not target:
+                        try:
+                            print(f"DEBUG: Strategy 3: Trying direct send with username: {username}")
+                            # Try to send directly using username - Telethon might resolve it automatically
+                            # This is a last resort that sometimes works
+                            username_with_at = f"@{username}" if not username.startswith('@') else username
+                            target = username_with_at
+                            method_used = "direct_username_send"
+                            print(f"DEBUG: Using username directly for send (may fail if access_hash required): {username_with_at}")
+                        except Exception as e:
+                            print(f"DEBUG: Direct username send setup failed: {e}")
             
             # PRIORITY 2: Try user_id (if username not available or failed)
             if not target and raw_user_id:
@@ -329,7 +379,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                                     print(f"DEBUG: ✓ Found user via get_entity (ID): {user_id_value} (cached)")
                             except Exception as e:
                                 print(f"DEBUG: get_entity (ID) failed: {e}")
-                            
+
                             # Strategy 2: Try GetUsersRequest
                             if not target:
                                 try:
@@ -478,10 +528,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                 else:
                     # Other ValueError/TypeError, re-raise
                     raise
-            
-            await client.disconnect()
-            return True, None
-        except (ValueError, TypeError) as e:
+        except Exception as e:
             error_str = str(e)
             await client.disconnect()
             return False, f'Invalid user_id format: {user.get("user_id")} - {error_str}'
@@ -1116,12 +1163,12 @@ def new_campaign():
                 # Generate new ID: acc_{phone}_{campaign_id}
                 phone_clean = phone.replace('+', '').replace(' ', '').replace('-', '')
                 new_account_id = f"acc_{phone_clean}_{campaign_id}"
-                
-                # Update account with new ID and campaign_id
+                    
+                    # Update account with new ID and campaign_id
                 update_account(account_id, {
-                    'new_id': new_account_id,
-                    'campaign_id': campaign_id
-                })
+                        'new_id': new_account_id,
+                        'campaign_id': campaign_id
+                    })
         flash('Campaign created! Starting...', 'success')
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
 
@@ -3131,10 +3178,10 @@ def resend_registration_code():
                 
                 return {'success': True, 'session_id': session_id, 'message': 'Code resent to phone'}
                 
-            except PhoneNumberInvalidError:
+            except Exception as e:
                 await client.disconnect()
                 return {'success': False, 'error': 'Invalid phone number'}
-            except FloodWaitError as e:
+            except Exception as e:
                 await client.disconnect()
                 return {'success': False, 'error': f'Flood wait: please try again after {e.seconds} seconds'}
             except Exception as e:
@@ -3726,7 +3773,7 @@ def delete_registration_account(phone):
                 session_data = registration_sessions[phone]
                 client = session_data['client']
                 asyncio.run(client.disconnect())
-            except:
+            except Exception as e:
                 pass
             del registration_sessions[phone]
         
