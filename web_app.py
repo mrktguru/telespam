@@ -232,119 +232,19 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         method_used = None
         
         try:
-            # PRIORITY 1: Try username first (if available)
+            # PRIORITY 1: For username - send directly without trying to get access_hash (best for unknown users/spam)
             if username:
-                print(f"DEBUG: ===== PRIORITY 1: Resolving by USERNAME: {username} =====")
+                print(f"DEBUG: ===== PRIORITY 1: Sending by USERNAME: {username} =====")
+                print(f"DEBUG: For spam/outreach to unknown users, sending directly by username (no access_hash needed)")
                 
-                # Check cache first
-                username_cache_key = f"username:{username}"
-                if username_cache_key in user_entity_cache:
-                    target = user_entity_cache[username_cache_key]
-                    method_used = "cache_username"
-                    print(f"DEBUG: ✓ Using cached entity for username: {username}")
-                else:
-                    # Strategy 1: Try ResolveUsernameRequest (best for unknown users)
-                    try:
-                        from telethon.tl.functions.contacts import ResolveUsernameRequest
-                        from telethon.tl.types import InputPeerUser
-                        print(f"DEBUG: Strategy 1: Trying ResolveUsernameRequest for username: {username}")
-                        print(f"DEBUG: Account API ID: {account_api_id}, API Hash: {account_api_hash[:10]}...")
-                        resolved = await client(ResolveUsernameRequest(username))
-                        print(f"DEBUG: ResolveUsernameRequest response: {type(resolved)}")
-                        if resolved:
-                            print(f"DEBUG: ResolveUsernameRequest has 'users' attr: {hasattr(resolved, 'users')}")
-                            if hasattr(resolved, 'users'):
-                                print(f"DEBUG: ResolveUsernameRequest users count: {len(resolved.users) if resolved.users else 0}")
-                            if hasattr(resolved, 'chats'):
-                                print(f"DEBUG: ResolveUsernameRequest chats count: {len(resolved.chats) if resolved.chats else 0}")
-                        
-                        if resolved and hasattr(resolved, 'users') and len(resolved.users) > 0:
-                            user_obj = resolved.users[0]
-                            print(f"DEBUG: ResolveUsernameRequest succeeded: user_id={user_obj.id}, username={getattr(user_obj, 'username', 'N/A')}")
-                            print(f"DEBUG: User object type: {type(user_obj)}, class: {user_obj.__class__.__name__}")
-                            
-                            # Check if user is deleted or empty
-                            if hasattr(user_obj, 'deleted') and user_obj.deleted:
-                                print(f"DEBUG: ❌ User account is deleted")
-                                await client.disconnect()
-                                return False, f'User account is deleted (username: {username})'
-                            
-                            if hasattr(user_obj, 'min') and user_obj.min:
-                                print(f"DEBUG: ❌ User is empty (min=True)")
-                                await client.disconnect()
-                                return False, f'User is empty or not accessible (username: {username}, min=True)'
-                            
-                            if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
-                                target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                                method_used = "ResolveUsernameRequest"
-                                # Cache successful resolution by both username and ID
-                                user_entity_cache[username_cache_key] = target
-                                if user_obj.id:
-                                    user_entity_cache[f"{user_obj.id}"] = target
-                                print(f"DEBUG: ✓ Got access_hash via ResolveUsernameRequest for username: {username} (cached)")
-                            else:
-                                print(f"DEBUG: ⚠ ResolveUsernameRequest returned user but no access_hash")
-                                print(f"DEBUG: User object attributes: {[attr for attr in dir(user_obj) if not attr.startswith('_')]}")
-                        elif resolved and hasattr(resolved, 'chats') and len(resolved.chats) > 0:
-                            print(f"DEBUG: ⚠ ResolveUsernameRequest returned chat instead of user (username might be a channel/group)")
-                            await client.disconnect()
-                            return False, f'Username {username} is a channel or group, not a user'
-                        else:
-                            print(f"DEBUG: ResolveUsernameRequest returned empty result or no users")
-                            print(f"DEBUG: Response type: {type(resolved)}, attributes: {[attr for attr in dir(resolved) if not attr.startswith('_')]}")
-                    except Exception as e:
-                        print(f"DEBUG: ResolveUsernameRequest failed: {e}")
-                        print(f"DEBUG: Exception type: {type(e)}")
-                        import traceback
-                        print(f"DEBUG: ResolveUsernameRequest traceback: {traceback.format_exc()}")
-                    
-                    # Strategy 2: Try get_entity by username (if ResolveUsernameRequest failed)
-                    if not target:
-                        try:
-                            print(f"DEBUG: Strategy 2: Trying get_entity for username: {username}")
-                            # Try with @ prefix
-                            username_with_at = f"@{username}" if not username.startswith('@') else username
-                            print(f"DEBUG: Trying get_entity with: {username_with_at}")
-                            entity = await client.get_entity(username_with_at)
-                            print(f"DEBUG: get_entity succeeded: entity type={type(entity)}, id={getattr(entity, 'id', 'N/A')}")
-                            
-                            # Check if it's actually a user (not a channel/group)
-                            from telethon.tl.types import User, Channel, Chat
-                            if isinstance(entity, Channel) or isinstance(entity, Chat):
-                                print(f"DEBUG: ⚠ Entity is a channel/chat, not a user")
-                                await client.disconnect()
-                                return False, f'Username {username} is a channel or group, not a user'
-                            
-                            from telethon.tl.types import InputPeerUser
-                            if isinstance(entity, User) and hasattr(entity, 'access_hash') and entity.access_hash:
-                                target = InputPeerUser(user_id=entity.id, access_hash=entity.access_hash)
-                                method_used = "get_entity_username"
-                                # Cache successful resolution
-                                user_entity_cache[username_cache_key] = target
-                                if entity.id:
-                                    user_entity_cache[f"{entity.id}"] = target
-                                print(f"DEBUG: ✓ Found user via get_entity (username): {username} (cached)")
-                            else:
-                                print(f"DEBUG: ⚠ get_entity returned entity but no access_hash or not a User")
-                                print(f"DEBUG: Entity type: {type(entity)}, attributes: {[attr for attr in dir(entity) if not attr.startswith('_')]}")
-                        except Exception as e:
-                            print(f"DEBUG: get_entity (username) failed: {e}")
-                            print(f"DEBUG: Exception type: {type(e)}")
-                            import traceback
-                            print(f"DEBUG: get_entity traceback: {traceback.format_exc()}")
-                    
-                    # Strategy 3: Try direct send with username (sometimes works even without access_hash)
-                    if not target:
-                        try:
-                            print(f"DEBUG: Strategy 3: Trying direct send with username: {username}")
-                            # Try to send directly using username - Telethon might resolve it automatically
-                            # This is a last resort that sometimes works
-                            username_with_at = f"@{username}" if not username.startswith('@') else username
-                            target = username_with_at
-                            method_used = "direct_username_send"
-                            print(f"DEBUG: Using username directly for send (may fail if access_hash required): {username_with_at}")
-                        except Exception as e:
-                            print(f"DEBUG: Direct username send setup failed: {e}")
+                # For unknown users/spam: Send directly by username
+                # Telethon will automatically resolve username and handle the message
+                # This is the ONLY method that works reliably for unknown users
+                username_with_at = f"@{username}" if not username.startswith('@') else username
+                target = username_with_at
+                method_used = "direct_username"
+                print(f"DEBUG: ✓ Using direct username for spam: {username_with_at}")
+                print(f"DEBUG: API ID: {account_api_id} (must be from my.telegram.org for spam)")
             
             # PRIORITY 2: Try user_id (if username not available or failed)
             if not target and raw_user_id:
