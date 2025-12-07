@@ -327,7 +327,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
                             else:
                                 print(f"DEBUG: ⚠ get_entity returned entity but no access_hash or not a User")
                                 print(f"DEBUG: Entity type: {type(entity)}, attributes: {[attr for attr in dir(entity) if not attr.startswith('_')]}")
-            except Exception as e:
+                        except Exception as e:
                             print(f"DEBUG: get_entity (username) failed: {e}")
                             print(f"DEBUG: Exception type: {type(e)}")
                             import traceback
