@@ -1810,7 +1810,20 @@ class Database:
 
 
 # Singleton instance
-db = Database()
+# Wrap in try-except to prevent import errors from crashing the app
+try:
+    db = Database()
+except Exception as e:
+    import sys
+    print(f"ERROR: Failed to initialize database: {e}", file=sys.stderr)
+    import traceback
+    traceback.print_exc(file=sys.stderr)
+    # Create a dummy database object to prevent import errors
+    # The actual error will be caught when trying to use db
+    class DummyDatabase:
+        def __getattr__(self, name):
+            raise RuntimeError(f"Database not initialized. Original error: {e}")
+    db = DummyDatabase()
 
 
 if __name__ == "__main__":
