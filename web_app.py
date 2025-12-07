@@ -143,7 +143,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         if isinstance(account_api_id, str):
             try:
                 account_api_id = int(account_api_id)
-            except (ValueError, TypeError):
+            except Exception as e:
                 account_api_id = None
     
     # Fallback to config if account doesn't have API credentials
@@ -485,7 +485,7 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         await client.disconnect()
                 return True, None
                 
-            except (ValueError, TypeError) as ve:
+            except Exception as e:
                 error_str = str(ve)
                 # Check for invalid Peer errors
                 if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
@@ -3181,10 +3181,10 @@ def resend_registration_code():
                 
                 return {'success': True, 'session_id': session_id, 'message': 'Code resent to phone'}
                 
-            except PhoneNumberInvalidError:
+            except Exception as e:
                 await client.disconnect()
                 return {'success': False, 'error': 'Invalid phone number'}
-            except FloodWaitError as e:
+            except Exception as e:
                 await client.disconnect()
                 return {'success': False, 'error': f'Flood wait: please try again after {e.seconds} seconds'}
             except Exception as e:
@@ -3305,13 +3305,13 @@ def submit_registration_code():
                 
                 return {'success': True, 'message': 'Registration successful'}
                 
-            except PhoneCodeInvalidError:
+                except Exception as e:
                 return {'success': False, 'error': 'PhoneCodeInvalidError', 'message': 'Invalid verification code'}
-            except PhoneCodeExpiredError:
+                except Exception as e:
                 return {'success': False, 'error': 'PhoneCodeExpiredError', 'message': 'Code expired. Please request a new code.'}
-            except SessionPasswordNeededError:
+                except Exception as e:
                 return {'success': False, 'error': 'SessionPasswordNeededError', 'message': '2FA password required (not yet supported)'}
-            except Exception as e:
+                except Exception as e:
                 return {'success': False, 'error': str(e)}
         
         result = asyncio.run(sign_in())
@@ -3776,7 +3776,7 @@ def delete_registration_account(phone):
                 session_data = registration_sessions[phone]
                 client = session_data['client']
                 asyncio.run(client.disconnect())
-            except:
+            except Exception as e:
                 pass
             del registration_sessions[phone]
         
