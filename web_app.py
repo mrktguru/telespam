@@ -193,14 +193,34 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
         # PRIORITY: USERNAME FIRST, then USER_ID
         # Strategy: Try username first (most reliable for unknown users), then user_id as fallback
         
+        # Extract username from username field
         username = user.get('username', '').strip().lstrip('@') if user.get('username') else None
         raw_user_id = user.get('user_id')
+        
+        # CRITICAL: Check if user_id field actually contains a username (starts with @ or contains non-numeric chars)
+        # Sometimes user_id field in database contains username instead of numeric ID
+        if raw_user_id:
+            raw_user_id_str = str(raw_user_id).strip()
+            # If user_id starts with @ or contains non-numeric characters (except digits), treat it as username
+            if raw_user_id_str.startswith('@') or (not raw_user_id_str.isdigit() and raw_user_id_str):
+                print(f"DEBUG: ⚠ user_id field contains username-like value: '{raw_user_id_str}', treating as username")
+                # If we don't have username from username field, use this as username
+                if not username:
+                    username = raw_user_id_str.lstrip('@')
+                    print(f"DEBUG: Using user_id value as username: {username}")
+                # Clear raw_user_id since it's actually a username
+                raw_user_id = None
+            else:
+                # It's a valid numeric user_id, keep it
+                pass
         
         # DIAGNOSTIC: Log raw data from database before processing
         print(f"DEBUG: ===== USER RESOLUTION: Raw user data from SQLite =====")
         print(f"DEBUG: Full user dict: {user}")
-        print(f"DEBUG: user['user_id'] = {raw_user_id} (type: {type(raw_user_id)})")
-        print(f"DEBUG: user['username'] = {username} (type: {type(username)})")
+        print(f"DEBUG: user['user_id'] (raw) = {user.get('user_id')} (type: {type(user.get('user_id'))})")
+        print(f"DEBUG: user['username'] (raw) = {user.get('username')} (type: {type(user.get('username'))})")
+        print(f"DEBUG: Processed username = {username}")
+        print(f"DEBUG: Processed user_id = {raw_user_id}")
         print(f"DEBUG: user['phone'] = {user.get('phone')} (type: {type(user.get('phone'))})")
         
         # Validate: need at least username or user_id
