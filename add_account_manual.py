@@ -9,10 +9,8 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-# Set mock storage mode
-os.environ['USE_MOCK_STORAGE'] = 'true'
-
-from mock_sheets import sheets_manager
+# Use database for accounts
+from database import db
 
 
 async def create_and_add_account():
@@ -158,7 +156,7 @@ async def create_and_add_account():
             'type': 'manual'  # Mark as manually added
         }
 
-        sheets_manager.add_account(account_data)
+        db.add_account(account_data)
 
         print("=" * 70)
         print("🎉 SUCCESS! Account added to system")

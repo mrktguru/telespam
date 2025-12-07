@@ -20,35 +20,161 @@ class Database:
         self.init_db()
 
     def get_connection(self):
-        """Get database connection with proper error handling"""
-        try:
-            # Ensure database file exists and is writable
-            if self.db_path.exists():
-                # Check if file is writable
-                if not os.access(self.db_path, os.W_OK):
-                    raise PermissionError(f"Database file {self.db_path} is not writable")
-            
-            conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            # Enable WAL mode for better concurrency
+        """Get database connection with proper error handling and permission fixing"""
+        import stat
+        import time
+        
+        # Ensure database directory exists and is writable
+        db_dir = self.db_path.parent
+        if not db_dir.exists():
             try:
-                conn.execute('PRAGMA journal_mode=WAL')
-            except sqlite3.OperationalError:
-                # If WAL fails, try DELETE mode
-                conn.execute('PRAGMA journal_mode=DELETE')
-            return conn
-        except sqlite3.OperationalError as e:
-            if "database is locked" in str(e).lower():
-                raise Exception(f"Database is locked. Please close other processes using the database. Error: {e}")
-            elif "readonly" in str(e).lower():
-                raise Exception(f"Database is read-only. Check file permissions: {self.db_path}")
-            else:
-                raise
+                db_dir.mkdir(parents=True, exist_ok=True)
+                # Set directory permissions
+                os.chmod(db_dir, 0o755)
+            except Exception as e:
+                raise PermissionError(f"Failed to create database directory {db_dir}: {e}")
+        
+        # Fix directory permissions if needed
+        try:
+            if not os.access(db_dir, os.W_OK):
+                os.chmod(db_dir, 0o755)
+        except Exception as e:
+            raise PermissionError(f"Database directory {db_dir} is not writable and cannot be fixed: {e}")
+        
+        # Ensure database file exists and is writable
+        if self.db_path.exists():
+            # Check if file is writable
+            if not os.access(self.db_path, os.W_OK):
+                # Try to fix permissions
+                try:
+                    os.chmod(self.db_path, 0o664)
+                except Exception as perm_error:
+                    raise PermissionError(f"Database file {self.db_path} is not writable and cannot be fixed. Error: {perm_error}")
+            
+            # Fix WAL and SHM file permissions if they exist (SQLite WAL mode)
+            wal_path = Path(str(self.db_path) + '-wal')
+            shm_path = Path(str(self.db_path) + '-shm')
+            if wal_path.exists() and not os.access(wal_path, os.W_OK):
+                try:
+                    os.chmod(wal_path, 0o664)
+                except Exception:
+                    pass  # Non-critical, continue
+            if shm_path.exists() and not os.access(shm_path, os.W_OK):
+                try:
+                    os.chmod(shm_path, 0o664)
+                except Exception:
+                    pass  # Non-critical, continue
+        else:
+            # Create empty database file with proper permissions
+            try:
+                self.db_path.touch(mode=0o664)
+            except Exception as e:
+                raise PermissionError(f"Failed to create database file {self.db_path}: {e}")
+        
+        # Use longer timeout and retry logic for database locking
+        max_retries = 3
+        retry_delay = 0.1  # 100ms
+        
+        for attempt in range(max_retries):
+            try:
+                conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
+                conn.row_factory = sqlite3.Row
+                # Enable WAL mode for better concurrency
+                try:
+                    conn.execute('PRAGMA journal_mode=WAL')
+                except sqlite3.OperationalError:
+                    # If WAL fails, try DELETE mode
+                    conn.execute('PRAGMA journal_mode=DELETE')
+                # Set busy timeout to handle concurrent access
+                conn.execute('PRAGMA busy_timeout = 30000')  # 30 seconds
+                return conn
+            except sqlite3.OperationalError as e:
+                error_str = str(e).lower()
+                if "database is locked" in error_str and attempt < max_retries - 1:
+                    # Wait before retry with exponential backoff
+                    time.sleep(retry_delay * (2 ** attempt))
+                    continue
+                elif "readonly" in error_str or "read-only" in error_str:
+                    # Try to fix permissions and retry
+                    try:
+                        # Fix file permissions
+                        if self.db_path.exists():
+                            os.chmod(self.db_path, 0o664)
+                        # Fix WAL and SHM files if they exist
+                        wal_path = Path(str(self.db_path) + '-wal')
+                        shm_path = Path(str(self.db_path) + '-shm')
+                        if wal_path.exists():
+                            try:
+                                os.chmod(wal_path, 0o664)
+                            except Exception:
+                                pass
+                        if shm_path.exists():
+                            try:
+                                os.chmod(shm_path, 0o664)
+                            except Exception:
+                                pass
+                        # Fix directory permissions
+                        os.chmod(db_dir, 0o755)
+                        # Retry connection
+                        time.sleep(0.1)  # Small delay before retry
+                        conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
+                        conn.row_factory = sqlite3.Row
+                        conn.execute('PRAGMA busy_timeout = 30000')
+                        return conn
+                    except Exception as retry_error:
+                        # Get current permissions for debugging
+                        try:
+                            file_stat = os.stat(self.db_path)
+                            dir_stat = os.stat(db_dir)
+                            file_perms = oct(file_stat.st_mode)[-3:]
+                            dir_perms = oct(dir_stat.st_mode)[-3:]
+                            wal_info = ""
+                            shm_info = ""
+                            if wal_path.exists():
+                                wal_stat = os.stat(wal_path)
+                                wal_perms = oct(wal_stat.st_mode)[-3:]
+                                wal_info = f", WAL: {wal_path} (perms: {wal_perms})"
+                            if shm_path.exists():
+                                shm_stat = os.stat(shm_path)
+                                shm_perms = oct(shm_stat.st_mode)[-3:]
+                                shm_info = f", SHM: {shm_path} (perms: {shm_perms})"
+                            raise Exception(
+                                f"Database is read-only. File: {self.db_path} (perms: {file_perms}), "
+                                f"Directory: {db_dir} (perms: {dir_perms}){wal_info}{shm_info}. "
+                                f"Tried to fix but failed: {retry_error}. "
+                                f"Please run: chmod 664 {self.db_path}* && chmod 755 {db_dir}"
+                            )
+                        except:
+                            raise Exception(
+                                f"Database is read-only. Check file permissions: {self.db_path}. "
+                                f"Tried to fix but failed: {retry_error}"
+                            )
+                else:
+                    raise
 
     def init_db(self):
         """Initialize database tables"""
         conn = self.get_connection()
         cursor = conn.cursor()
+
+        # Migrate existing accounts table to add api_id and api_hash if needed
+        try:
+            # Check if api_id column exists
+            cursor.execute("PRAGMA table_info(accounts)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            if 'api_id' not in columns:
+                print("Migrating accounts table: adding api_id column...")
+                cursor.execute('ALTER TABLE accounts ADD COLUMN api_id TEXT')
+            
+            if 'api_hash' not in columns:
+                print("Migrating accounts table: adding api_hash column...")
+                cursor.execute('ALTER TABLE accounts ADD COLUMN api_hash TEXT')
+            
+            conn.commit()
+        except Exception as e:
+            print(f"Warning: Could not migrate accounts table: {e}")
+            conn.rollback()
 
         # Users table
         cursor.execute('''
@@ -120,6 +246,41 @@ class Database:
                 sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 status TEXT DEFAULT 'sent',
                 FOREIGN KEY (conversation_id) REFERENCES campaign_conversations (id)
+            )
+        ''')
+
+        # Accounts table - for Telegram sender accounts
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS accounts (
+                id TEXT PRIMARY KEY,
+                phone TEXT UNIQUE NOT NULL,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                bio TEXT,
+                session_file TEXT,
+                status TEXT DEFAULT 'checking',
+                daily_sent INTEGER DEFAULT 0,
+                total_sent INTEGER DEFAULT 0,
+                cooldown_until TEXT,
+                last_used_at TEXT,
+                added_at TEXT,
+                flood_count INTEGER DEFAULT 0,
+                use_proxy BOOLEAN DEFAULT 0,
+                proxy TEXT,
+                proxy_type TEXT,
+                proxy_host TEXT,
+                proxy_port TEXT,
+                proxy_user TEXT,
+                proxy_pass TEXT,
+                campaign_id INTEGER,
+                notes TEXT,
+                photo_count INTEGER DEFAULT 0,
+                rate_limits TEXT,
+                api_id TEXT,
+                api_hash TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
@@ -376,6 +537,18 @@ class Database:
             return campaign
 
         return None
+
+    def get_all_campaigns(self) -> List[Dict]:
+        """Get all campaigns"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM campaigns ORDER BY created_at DESC')
+        rows = cursor.fetchall()
+
+        conn.close()
+
+        return [dict(row) for row in rows]
 
     def get_user_campaigns(self, user_id: int, limit: int = 50) -> List[Dict]:
         """Get user's campaigns"""
@@ -660,6 +833,36 @@ class Database:
 
         return dict(row) if row else None
 
+    def get_conversation_by_user_id(self, recipient_user_id: str) -> Optional[Dict]:
+        """Get conversation by recipient user ID (for backward compatibility with get_dialog)
+        
+        Args:
+            recipient_user_id: Telegram user ID of the recipient
+            
+        Returns:
+            Conversation dict with account_id field (mapped from sender_account_id) or None
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'SELECT * FROM campaign_conversations WHERE recipient_user_id = ? ORDER BY created_at DESC LIMIT 1',
+                (str(recipient_user_id),)
+            )
+            row = cursor.fetchone()
+            
+            if row:
+                conversation = dict(row)
+                # Map sender_account_id to account_id for backward compatibility
+                conversation['account_id'] = conversation.get('sender_account_id')
+                return conversation
+            return None
+        except Exception as e:
+            print(f"Error getting conversation by user_id: {e}")
+            return None
+        finally:
+            conn.close()
+
     def get_conversation_messages(self, conversation_id: int) -> List[Dict]:
         """Get all messages in a conversation"""
         conn = self.get_connection()
@@ -745,7 +948,31 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
 
-        return [dict(row) for row in rows]
+        # Convert rows to dicts and ensure proper data types
+        result = []
+        for row in rows:
+            user_dict = dict(row)
+            # DIAGNOSTIC: Log raw data from SQLite
+            print(f"DEBUG: Raw SQLite row for user: {dict(row)}")
+            print(f"DEBUG:   user_id from SQLite: {user_dict.get('user_id')} (type: {type(user_dict.get('user_id'))})")
+            
+            # Ensure user_id is preserved as-is (can be string or None)
+            # Don't convert here - let the calling code handle conversion
+            # But ensure it's not empty string if it should be None
+            if user_dict.get('user_id') == '':
+                user_dict['user_id'] = None
+                print(f"DEBUG:   WARNING: Empty string user_id converted to None")
+            
+            # Same for username and phone
+            if user_dict.get('username') == '':
+                user_dict['username'] = None
+            if user_dict.get('phone') == '':
+                user_dict['phone'] = None
+            
+            result.append(user_dict)
+        
+        print(f"DEBUG: Returning {len(result)} users from get_campaign_users")
+        return result
 
     def get_all_campaign_users(self) -> List[Dict]:
         """Get all users with campaign information for Users for Outreach"""
@@ -1118,6 +1345,57 @@ class Database:
         finally:
             conn.close()
 
+    def add_registration_proxies_bulk(self, proxies: List[Dict]) -> int:
+        """Add multiple registration proxies at once
+        
+        Args:
+            proxies: List of proxy dictionaries
+            
+        Returns:
+            Number of successfully added proxies
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        added_count = 0
+        try:
+            for proxy_data in proxies:
+                try:
+                    cursor.execute('''
+                        INSERT INTO registration_proxies 
+                        (name, type, provider, host, port, username, password, protocol, 
+                         session_type, rotation_interval, country, exclude_countries, 
+                         total_gb_purchased, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        proxy_data.get('name'),
+                        proxy_data.get('type'),
+                        proxy_data.get('provider'),
+                        proxy_data.get('host'),
+                        proxy_data.get('port'),
+                        proxy_data.get('username'),
+                        proxy_data.get('password'),
+                        proxy_data.get('protocol', 'socks5'),
+                        proxy_data.get('session_type', 'rotating'),
+                        proxy_data.get('rotation_interval', 20),
+                        proxy_data.get('country'),
+                        json.dumps(proxy_data.get('exclude_countries', [])) if proxy_data.get('exclude_countries') else None,
+                        proxy_data.get('total_gb_purchased', 0),
+                        proxy_data.get('notes')
+                    ))
+                    added_count += 1
+                except Exception as e:
+                    print(f"Error adding proxy {proxy_data.get('name', 'unknown')}: {e}")
+                    continue
+            
+            conn.commit()
+            return added_count
+        except Exception as e:
+            print(f"Error in bulk add registration proxies: {e}")
+            conn.rollback()
+            return added_count
+        finally:
+            conn.close()
+
     # Device presets operations
     def add_device_preset(self, device_data: Dict) -> Optional[int]:
         """Add new device preset"""
@@ -1252,9 +1530,300 @@ class Database:
         finally:
             conn.close()
 
+    # ============================================================================
+    # ACCOUNTS OPERATIONS
+    # ============================================================================
+
+    def add_account(self, account: Dict) -> bool:
+        """Add new account to database"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        # Check if account with same phone already exists (normalize phone for comparison)
+        phone = account.get('phone')
+        if phone:
+            # Normalize phone for comparison
+            phone_normalized = phone.replace('+', '').replace(' ', '').replace('-', '').strip()
+            
+            # Check for exact match first
+            cursor.execute('SELECT id, phone FROM accounts WHERE phone = ?', (phone,))
+            existing = cursor.fetchone()
+            
+            # Also check normalized phones
+            if not existing:
+                all_accounts = cursor.execute('SELECT id, phone FROM accounts').fetchall()
+                for acc in all_accounts:
+                    existing_phone = acc['phone'] or ''
+                    existing_normalized = existing_phone.replace('+', '').replace(' ', '').replace('-', '').strip()
+                    if existing_normalized == phone_normalized:
+                        existing = acc
+                        break
+            
+            if existing:
+                print(f"WARNING: Account with phone {phone} (normalized: {phone_normalized}) already exists (ID: {existing['id']}), skipping duplicate")
+                conn.close()
+                return False
+        
+        try:
+            cursor.execute('''
+                INSERT INTO accounts (
+                    id, phone, username, first_name, last_name, bio, session_file,
+                    status, daily_sent, total_sent, cooldown_until, last_used_at,
+                    added_at, flood_count, use_proxy, proxy, proxy_type, proxy_host,
+                    proxy_port, proxy_user, proxy_pass, campaign_id, notes, photo_count,
+                    api_id, api_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                account.get('id'),
+                account.get('phone'),
+                account.get('username'),
+                account.get('first_name'),
+                account.get('last_name'),
+                account.get('bio'),
+                account.get('session_file'),
+                account.get('status', 'checking'),
+                account.get('daily_sent', 0),
+                account.get('total_sent', 0),
+                account.get('cooldown_until'),
+                account.get('last_used_at'),
+                account.get('added_at'),
+                account.get('flood_count', 0),
+                1 if account.get('use_proxy') else 0,
+                account.get('proxy'),
+                account.get('proxy_type'),
+                account.get('proxy_host'),
+                account.get('proxy_port'),
+                account.get('proxy_user'),
+                account.get('proxy_pass'),
+                account.get('campaign_id'),
+                account.get('notes'),
+                account.get('photo_count', 0),
+                str(account.get('api_id')) if account.get('api_id') else None,
+                account.get('api_hash')
+            ))
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.OperationalError as e:
+            conn.rollback()
+            conn.close()
+            error_str = str(e).lower()
+            import traceback
+            print(f"ERROR: SQLite OperationalError in add_account: {e}")
+            print(f"ERROR: Traceback: {traceback.format_exc()}")
+            if "readonly" in error_str or "read-only" in error_str:
+                # Try to fix permissions and retry
+                try:
+                    # Fix file permissions
+                    if self.db_path.exists():
+                        os.chmod(self.db_path, 0o664)
+                    # Fix WAL and SHM files
+                    wal_path = Path(str(self.db_path) + '-wal')
+                    shm_path = Path(str(self.db_path) + '-shm')
+                    if wal_path.exists():
+                        os.chmod(wal_path, 0o664)
+                    if shm_path.exists():
+                        os.chmod(shm_path, 0o664)
+                    # Fix directory
+                    os.chmod(self.db_path.parent, 0o755)
+                    # Retry
+                    conn.close()
+                    conn = self.get_connection()
+                    cursor = conn.cursor()
+                    
+                    # Check for duplicate again before retry (normalize phone for comparison)
+                    phone = account.get('phone')
+                    if phone:
+                        # Normalize phone for comparison
+                        phone_normalized = phone.replace('+', '').replace(' ', '').replace('-', '').strip()
+                        
+                        # Check for exact match first
+                        cursor.execute('SELECT id, phone FROM accounts WHERE phone = ?', (phone,))
+                        existing = cursor.fetchone()
+                        
+                        # Also check normalized phones
+                        if not existing:
+                            all_accounts = cursor.execute('SELECT id, phone FROM accounts').fetchall()
+                            for acc in all_accounts:
+                                existing_phone = acc['phone'] or ''
+                                existing_normalized = existing_phone.replace('+', '').replace(' ', '').replace('-', '').strip()
+                                if existing_normalized == phone_normalized:
+                                    existing = acc
+                                    break
+                        
+                        if existing:
+                            print(f"WARNING: Account with phone {phone} (normalized: {phone_normalized}) already exists (ID: {existing['id']}), skipping duplicate")
+                            conn.close()
+                            return False
+                    
+                    cursor.execute('''
+                        INSERT INTO accounts (
+                            id, phone, username, first_name, last_name, bio, session_file,
+                            status, daily_sent, total_sent, cooldown_until, last_used_at,
+                            added_at, flood_count, use_proxy, proxy, proxy_type, proxy_host,
+                            proxy_port, proxy_user, proxy_pass, campaign_id, notes, photo_count,
+                            api_id, api_hash
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        account.get('id'),
+                        account.get('phone'),
+                        account.get('username'),
+                        account.get('first_name'),
+                        account.get('last_name'),
+                        account.get('bio'),
+                        account.get('session_file'),
+                        account.get('status', 'checking'),
+                        account.get('daily_sent', 0),
+                        account.get('total_sent', 0),
+                        account.get('cooldown_until'),
+                        account.get('last_used_at'),
+                        account.get('added_at'),
+                        account.get('flood_count', 0),
+                        1 if account.get('use_proxy') else 0,
+                        account.get('proxy'),
+                        account.get('proxy_type'),
+                        account.get('proxy_host'),
+                        account.get('proxy_port'),
+                        account.get('proxy_user'),
+                        account.get('proxy_pass'),
+                        account.get('campaign_id'),
+                        account.get('notes'),
+                        account.get('photo_count', 0),
+                        str(account.get('api_id')) if account.get('api_id') else None,
+                        account.get('api_hash')
+                    ))
+                    conn.commit()
+                    conn.close()
+                    return True
+                except Exception as retry_error:
+                    print(f"Error adding account (readonly, retry failed): {retry_error}")
+                    import traceback
+                    traceback.print_exc()
+                    return False
+            else:
+                print(f"Error adding account: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
+        except Exception as e:
+            conn.rollback()
+            print(f"Error adding account: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            conn.close()
+
+    def get_account(self, account_id: str) -> Optional[Dict]:
+        """Get account by ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT * FROM accounts WHERE id = ?', (account_id,))
+            row = cursor.fetchone()
+            if row:
+                return self._row_to_dict(row, cursor.description)
+            return None
+        except Exception as e:
+            print(f"Error getting account: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_all_accounts(self) -> List[Dict]:
+        """Get all accounts"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT * FROM accounts ORDER BY created_at DESC')
+            rows = cursor.fetchall()
+            accounts = []
+            for row in rows:
+                account = self._row_to_dict(row, cursor.description)
+                # Convert boolean fields
+                if account.get('use_proxy') is not None:
+                    account['use_proxy'] = bool(account.get('use_proxy'))
+                accounts.append(account)
+            return accounts
+        except Exception as e:
+            print(f"Error getting all accounts: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+        finally:
+            conn.close()
+
+    def update_account(self, account_id: str, updates: Dict) -> bool:
+        """Update account fields"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            # Handle ID change if requested
+            if 'new_id' in updates:
+                new_id = updates.pop('new_id')
+                cursor.execute('UPDATE accounts SET id = ? WHERE id = ?', (new_id, account_id))
+                account_id = new_id
+            
+            # Build update query dynamically
+            if updates:
+                set_clause = ', '.join([f"{key} = ?" for key in updates.keys()])
+                set_clause += ', updated_at = CURRENT_TIMESTAMP'
+                values = list(updates.values()) + [account_id]
+                
+                # Convert boolean to int for use_proxy
+                if 'use_proxy' in updates:
+                    idx = list(updates.keys()).index('use_proxy')
+                    values[idx] = 1 if values[idx] else 0
+                
+                cursor.execute(f'UPDATE accounts SET {set_clause} WHERE id = ?', values)
+                conn.commit()
+                return True
+            return False
+        except Exception as e:
+            conn.rollback()
+            print(f"Error updating account: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            conn.close()
+
+    def delete_account(self, account_id: str) -> bool:
+        """Delete account by ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('DELETE FROM accounts WHERE id = ?', (account_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            conn.rollback()
+            print(f"Error deleting account: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def _row_to_dict(self, row, description) -> Dict:
+        """Convert database row to dictionary"""
+        if row is None:
+            return {}
+        return {desc[0]: row[i] for i, desc in enumerate(description)}
+
 
 # Singleton instance
-db = Database()
+# Wrap in try-except to prevent import errors from crashing the app
+try:
+    db = Database()
+except Exception as e:
+    import sys
+    print(f"ERROR: Failed to initialize database: {e}", file=sys.stderr)
+    import traceback
+    traceback.print_exc(file=sys.stderr)
+    # Create a dummy database object to prevent import errors
+    # The actual error will be caught when trying to use db
+    class DummyDatabase:
+        def __getattr__(self, name):
+            raise RuntimeError(f"Database not initialized. Original error: {e}")
+    db = DummyDatabase()
 
 
 if __name__ == "__main__":

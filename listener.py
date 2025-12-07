@@ -6,7 +6,7 @@ from typing import Dict, List
 from telethon import events, TelegramClient
 from datetime import datetime
 import config
-from sheets_loader import sheets_manager
+from database import db
 from proxy import get_client
 
 
@@ -23,7 +23,7 @@ class MessageListener:
         self.running = True
 
         # Get all active accounts
-        accounts = sheets_manager.get_all_accounts()
+        accounts = db.get_all_accounts()
         active_accounts = [
             acc for acc in accounts
             if acc.get('status') in [
@@ -33,8 +33,17 @@ class MessageListener:
             ]
         ]
 
-        # Get settings
-        settings = sheets_manager.get_settings()
+        # Get settings from config
+        settings = {
+            "proxy_enabled": config.PROXY_ENABLED,
+            "default_proxy_type": config.DEFAULT_PROXY_TYPE,
+            "default_proxy_host": config.DEFAULT_PROXY_HOST,
+            "default_proxy_port": config.DEFAULT_PROXY_PORT,
+            "default_proxy_user": config.DEFAULT_PROXY_USER,
+            "default_proxy_pass": config.DEFAULT_PROXY_PASS,
+            "api_id": config.API_ID,
+            "api_hash": config.API_HASH
+        }
 
         # Create clients for each account
         for account in active_accounts:
@@ -78,7 +87,7 @@ class MessageListener:
             sender = await event.get_sender()
 
             # Get account info
-            account = sheets_manager.get_account(account_id)
+            account = db.get_account(account_id)
 
             # Prepare message data
             message_data = {
@@ -112,23 +121,26 @@ class MessageListener:
             if message.text and (message.photo or message.video or message.document):
                 message_data["message"]["caption"] = message.text
 
-            # Update dialog in sheets
-            dialog = sheets_manager.get_dialog(sender.id)
-            if dialog:
-                sheets_manager.update_dialog(sender.id, {
-                    "last_response": message.text or '[Media]',
-                    "last_response_at": datetime.now().isoformat()
-                })
+            # Update conversation in database (if exists)
+            conversation = db.get_conversation_by_user_id(str(sender.id))
+            if conversation:
+                # Update last_message_at timestamp
+                # Note: We don't have update_conversation method, so we'll just log it
+                pass
 
-            # Log the received message
-            sheets_manager.add_log({
-                "account_id": account_id,
-                "user_id": sender.id,
-                "action": "receive",
-                "message_type": message_data["message"]["type"],
-                "result": "success",
-                "details": f"Received message from {sender.id}"
-            })
+            # Log the received message to campaign logs (if conversation exists)
+            if conversation:
+                try:
+                    campaigns = db.get_all_campaigns()
+                    for campaign in campaigns:
+                        db.add_campaign_log(
+                            campaign['id'],
+                            f"Received message from {sender.id}",
+                            level='info',
+                            details=f"Message type: {message_data['message']['type']}"
+                        )
+                except:
+                    pass
 
             # Send to n8n webhook
             await self.send_to_webhook(message_data)

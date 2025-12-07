@@ -19,10 +19,30 @@ from telethon.errors import FloodWaitError, UserPrivacyRestrictedError, PeerFloo
 from telethon.tl.functions.users import GetFullUserRequest
 
 from database import db
-from mock_sheets import sheets_manager
 from rate_limiter import RateLimiter
 from proxy_manager import ProxyManager
 import config
+
+# Account management - use database instead of mock_sheets
+def get_all_accounts():
+    """Get all accounts from database"""
+    return db.get_all_accounts()
+
+def get_account(account_id: str):
+    """Get account by ID from database"""
+    return db.get_account(account_id)
+
+def add_account(account: dict) -> bool:
+    """Add account to database"""
+    return db.add_account(account)
+
+def update_account(account_id: str, updates: dict) -> bool:
+    """Update account in database"""
+    return db.update_account(account_id, updates)
+
+def delete_account(account_id: str) -> bool:
+    """Delete account from database"""
+    return db.delete_account(account_id)
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -32,6 +52,10 @@ campaign_stop_flags = {}
 
 # Global dictionary to store active registration sessions (phone -> TelegramClient)
 registration_sessions = {}
+
+# Cache for successfully resolved user entities (user_id -> InputPeerUser)
+# This avoids repeated GetUsersRequest calls for the same user
+user_entity_cache = {}
 
 # Initialize managers
 rate_limiter = RateLimiter()
@@ -121,10 +145,46 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             )
             print(f"DEBUG: Using account proxy {proxy_id} for account {phone}")
 
+    # Use account-specific API credentials if available, otherwise use config
+    # CRITICAL: Sessions are bound to the API credentials they were created with
+    # If a session was created with different API ID/HASH, it won't work properly
+    account_api_id = account.get('api_id')
+    account_api_hash = account.get('api_hash')
+    
+    # Convert to int if string
+    if account_api_id:
+        if isinstance(account_api_id, str):
+            try:
+                account_api_id = int(account_api_id)
+            except (ValueError, TypeError):
+                account_api_id = None
+    
+    # Fallback to config if account doesn't have API credentials
+    if not account_api_id:
+        account_api_id = config.API_ID
+        print(f"DEBUG: Account {phone} has no api_id, using config.API_ID: {account_api_id}")
+    else:
+        print(f"DEBUG: Using account-specific api_id for {phone}: {account_api_id}")
+    
+    if not account_api_hash:
+        account_api_hash = config.API_HASH
+        print(f"DEBUG: Account {phone} has no api_hash, using config.API_HASH")
+    else:
+        print(f"DEBUG: Using account-specific api_hash for {phone}: {account_api_hash[:10]}...")
+    
+    # Log which credentials are being used
+    config_api_id = config.API_ID
+    config_api_hash = config.API_HASH
+    if account_api_id != config_api_id or account_api_hash != config_api_hash:
+        print(f"WARNING: Account {phone} uses different API credentials than config!")
+        print(f"  Account: api_id={account_api_id}, api_hash={account_api_hash[:10]}...")
+        print(f"  Config: api_id={config_api_id}, api_hash={config_api_hash[:10]}...")
+        print(f"  This is OK if the session was created with these credentials")
+
     client = TelegramClient(
         str(session_file),
-        api_id,
-        api_hash,
+        account_api_id,
+        account_api_hash,
         proxy=proxy
     )
 
@@ -136,129 +196,564 @@ async def send_message_to_user(account, user, message_text, media_path=None, med
             # Mark account as unauthorized so it's not used in future campaigns
             account_id = account.get('id')
             if account_id:
-                sheets_manager.update_account(account_id, {
+                update_account(account_id, {
                     'status': 'unauthorized',
                     'last_used_at': datetime.now().isoformat()
                 })
                 print(f"⚠ Account {account.get('phone')} ({account_id}) marked as unauthorized")
             return False, 'Account not authorized - session expired or invalid'
 
-        # Find user by user_id, username or phone (from XLS/CSV table)
-        target = None
-        user_identifier = None
-        error_details = []
-
-        # Try user_id first (most precise)
-        if user.get('user_id'):
+        # Find user by ID only (from XLS table)
+        # PRIORITY: USER_ID
+        # Strategy: Try direct send first, then GetUsersRequest if needed, with caching
+        
+        if not user.get('user_id'):
+            await client.disconnect()
+            return False, 'User ID is required'
+        
+        try:
+            # DIAGNOSTIC: Log raw data from database before processing
+            print(f"DEBUG: ===== MIGRATION DIAGNOSTIC: Raw user data from SQLite =====")
+            print(f"DEBUG: Full user dict: {user}")
+            print(f"DEBUG: user['user_id'] = {user.get('user_id')} (type: {type(user.get('user_id'))})")
+            print(f"DEBUG: user['username'] = {user.get('username')} (type: {type(user.get('username'))})")
+            print(f"DEBUG: user['phone'] = {user.get('phone')} (type: {type(user.get('phone'))})")
+            
+            # Convert user_id to int (can be string from DB)
+            raw_user_id = user.get('user_id')
+            if raw_user_id is None:
+                await client.disconnect()
+                print(f"DEBUG: ERROR: user_id is None in database!")
+                return False, 'User ID is None in database - migration issue?'
+            
+            user_id_str = str(raw_user_id).strip()
+            if not user_id_str or user_id_str == 'None' or user_id_str == '':
+                await client.disconnect()
+                print(f"DEBUG: ERROR: user_id is empty after conversion: '{user_id_str}'")
+                return False, f'User ID is empty after conversion: "{user_id_str}" (original: {raw_user_id}, type: {type(raw_user_id)})'
+            
+            # Try to convert to int
             try:
-                # Convert user_id to int (can be string from DB)
-                user_id_str = str(user['user_id']).strip()
-                if user_id_str:
-                    user_id_value = int(user_id_str)
-                    user_identifier = f"ID {user_id_value}"
-                    print(f"DEBUG: Attempting to find user by ID: {user_id_value}")
-
-                    # Try to get entity by ID - this works if user is in contacts or was contacted before
+                user_id_value = int(user_id_str)
+            except (ValueError, TypeError) as conv_error:
+                await client.disconnect()
+                print(f"DEBUG: ERROR: Cannot convert user_id to int: '{user_id_str}' (type: {type(user_id_str)})")
+                print(f"DEBUG: Conversion error: {conv_error}")
+                return False, f'Invalid user_id format: "{user_id_str}" (type: {type(user_id_str)}). Cannot convert to int. Migration issue?'
+            
+            print(f"DEBUG: ✓ Successfully converted user_id: '{raw_user_id}' (type: {type(raw_user_id)}) -> {user_id_value} (int)")
+            print(f"DEBUG: Sending to user ID: {user_id_value} (original from DB: {raw_user_id}, type: {type(raw_user_id)})")
+            print(f"DEBUG: ===== END MIGRATION DIAGNOSTIC =====")
+            
+            # CRITICAL FIX: Ensure user_id_value is int, not string
+            # Telethon requires INTEGER, not STRING for user_id
+            if not isinstance(user_id_value, int):
+                print(f"DEBUG: WARNING: user_id_value is not int! Converting: {user_id_value} (type: {type(user_id_value)})")
+                try:
+                    user_id_value = int(user_id_value)
+                    print(f"DEBUG: ✓ Converted to int: {user_id_value} (type: {type(user_id_value)})")
+                except (ValueError, TypeError) as e:
+                    await client.disconnect()
+                    return False, f'Cannot convert user_id to int: {user_id_value} (type: {type(user_id_value)}). Error: {e}'
+            
+            # Verify it's actually int
+            assert isinstance(user_id_value, int), f"user_id_value must be int, got {type(user_id_value)}"
+            print(f"DEBUG: ✓ Verified user_id_value is int: {user_id_value} (type: {type(user_id_value)})")
+            
+            # Check cache first
+            cache_key = f"{user_id_value}"
+            target = None
+            method_used = None
+            
+            if cache_key in user_entity_cache:
+                target = user_entity_cache[cache_key]
+                method_used = "cache"
+                print(f"DEBUG: ✓ Using cached entity for ID: {user_id_value}")
+            
+            # Strategy 1: Try get_entity first (works if user in contacts or was contacted)
+            if not target:
+                try:
+                    # CRITICAL: Ensure user_id_value is int for get_entity
+                    if not isinstance(user_id_value, int):
+                        print(f"DEBUG: WARNING: user_id_value is not int in get_entity! Converting...")
+                        user_id_value = int(user_id_value)
+                    entity = await client.get_entity(user_id_value)
+                    from telethon.tl.types import InputPeerUser
+                    if hasattr(entity, 'access_hash'):
+                        target = InputPeerUser(user_id=entity.id, access_hash=entity.access_hash)
+                        method_used = "get_entity"
+                        # Cache successful resolution
+                        user_entity_cache[cache_key] = target
+                        print(f"DEBUG: ✓ Found user via get_entity: {user_id_value} (cached)")
+                except Exception as e:
+                    print(f"DEBUG: get_entity failed: {e}")
+            
+            # Strategy 2: Try GetUsersRequest to get access_hash BEFORE sending
+            # This is more reliable than direct send without access_hash
+            if not target:
+                try:
+                    from telethon.tl.functions.users import GetUsersRequest
+                    from telethon.tl.types import InputPeerUser
+                    print(f"DEBUG: Strategy 2: Trying GetUsersRequest for ID: {user_id_value} (type: {type(user_id_value)})")
+                    # CRITICAL: Ensure user_id_value is int, not string
+                    if not isinstance(user_id_value, int):
+                        print(f"DEBUG: WARNING: user_id_value is not int in GetUsersRequest! Converting...")
+                        user_id_value = int(user_id_value)
+                    
+                    # Try multiple approaches for GetUsersRequest
+                    users_result = None
                     try:
-                        target = await client.get_entity(user_id_value)
-                        print(f"DEBUG: ✓ Found user by ID using get_entity: {user_id_value}")
-                    except (ValueError, TypeError) as ve:
-                        # If get_entity fails with ValueError (user not found), try GetUsersRequest
-                        print(f"DEBUG: get_entity failed for ID {user_id_value}: {ve}, trying GetUsersRequest...")
+                        # Approach 1: Try with plain int first (most common case)
+                        print(f"DEBUG: GetUsersRequest Approach 1: Plain int")
+                        users_result = await client(GetUsersRequest([user_id_value]))
+                        print(f"DEBUG: ✓ GetUsersRequest Approach 1 succeeded")
+                    except Exception as e1:
+                        print(f"DEBUG: GetUsersRequest Approach 1 failed: {e1}")
                         try:
-                            from telethon.tl.types import InputPeerUser
-                            from telethon.tl.functions.users import GetUsersRequest
+                            # Approach 2: Try with InputUser(user_id, access_hash=0)
+                            from telethon.tl.types import InputUser
+                            print(f"DEBUG: GetUsersRequest Approach 2: InputUser with access_hash=0")
+                            input_user = InputUser(user_id=user_id_value, access_hash=0)
+                            users_result = await client(GetUsersRequest([input_user]))
+                            print(f"DEBUG: ✓ GetUsersRequest Approach 2 succeeded")
+                        except Exception as e2:
+                            print(f"DEBUG: GetUsersRequest Approach 2 failed: {e2}")
+                            try:
+                                # Approach 3: Try with InputUserEmpty (sometimes works)
+                                from telethon.tl.types import InputUserEmpty
+                                print(f"DEBUG: GetUsersRequest Approach 3: InputUserEmpty")
+                                # Actually, InputUserEmpty won't work, skip this
+                                users_result = None
+                            except Exception as e3:
+                                print(f"DEBUG: GetUsersRequest Approach 3 failed: {e3}")
+                                users_result = None
+                    
+                    # DETAILED LOGGING: Check what GetUsersRequest returned (if any)
+                    if users_result and len(users_result) > 0:
+                            user_obj = users_result[0]
+                            print(f"DEBUG: ===== GetUsersRequest RESULT DETAILS =====")
+                            print(f"DEBUG: GetUsersRequest returned {len(users_result)} user(s)")
+                            print(f"DEBUG: First user object:")
+                            print(f"  - user.id: {getattr(user_obj, 'id', 'N/A')}")
+                            print(f"  - user.min: {getattr(user_obj, 'min', 'N/A')}  # ← IMPORTANT: min field")
+                            print(f"  - user.access_hash: {getattr(user_obj, 'access_hash', 'N/A')}")
+                            print(f"  - user.deleted: {getattr(user_obj, 'deleted', False)}")
+                            print(f"  - user.restricted: {getattr(user_obj, 'restricted', False)}")
+                            print(f"  - user.scam: {getattr(user_obj, 'scam', False)}")
+                            print(f"  - user.fake: {getattr(user_obj, 'fake', False)}")
+                            print(f"  - user.bot: {getattr(user_obj, 'bot', False)}")
+                            print(f"  - user.verified: {getattr(user_obj, 'verified', False)}")
+                            print(f"  - user.username: {getattr(user_obj, 'username', 'N/A')}")
+                            print(f"  - user.first_name: {getattr(user_obj, 'first_name', 'N/A')}")
+                            print(f"  - user.last_name: {getattr(user_obj, 'last_name', 'N/A')}")
+                            print(f"  - user.phone: {getattr(user_obj, 'phone', 'N/A')}")
+                            print(f"  - user.class_name: {user_obj.__class__.__name__}")
+                            print(f"  - All attributes: {[attr for attr in dir(user_obj) if not attr.startswith('_')]}")
+                            print(f"DEBUG: ===== END GetUsersRequest RESULT =====")
+                            
+                            # Check if user is deleted or empty
+                            if hasattr(user_obj, 'min') and user_obj.min:
+                                print(f"DEBUG: ⚠ WARNING: user.min is True - user may be deleted or empty!")
+                            
+                            if hasattr(user_obj, 'deleted') and user_obj.deleted:
+                                print(f"DEBUG: ⚠ WARNING: user.deleted is True - user account is deleted!")
+                            
+                    # If GetUsersRequest failed, try get_input_entity as alternative
+                    if not users_result:
+                        print(f"DEBUG: GetUsersRequest failed, trying get_input_entity as alternative...")
+                        try:
+                            # CRITICAL: Ensure user_id_value is int for get_input_entity
+                            if not isinstance(user_id_value, int):
+                                print(f"DEBUG: WARNING: user_id_value is not int in get_input_entity! Converting...")
+                                user_id_value = int(user_id_value)
+                            # Sometimes get_input_entity works better
+                            input_entity = await client.get_input_entity(user_id_value)
+                            if hasattr(input_entity, 'user_id') and hasattr(input_entity, 'access_hash'):
+                                target = InputPeerUser(user_id=input_entity.user_id, access_hash=input_entity.access_hash)
+                                method_used = "get_input_entity"
+                                user_entity_cache[cache_key] = target
+                                print(f"DEBUG: ✓ Got access_hash via get_input_entity for ID: {user_id_value} (cached)")
+                        except Exception as e2:
+                            print(f"DEBUG: get_input_entity also failed: {e2}")
+                            import traceback
+                            print(f"DEBUG: get_input_entity traceback: {traceback.format_exc()}")
+                    
+                    if not target and users_result and len(users_result) > 0:
+                        user_obj = users_result[0]
+                        
+                        # Check if user is valid (not deleted, not empty)
+                        is_deleted = getattr(user_obj, 'deleted', False)
+                        is_min = getattr(user_obj, 'min', False)
+                        
+                        if is_deleted or is_min:
+                            print(f"DEBUG: ⚠ User is deleted or empty (deleted={is_deleted}, min={is_min}), cannot send message")
+                            # Still try to get access_hash if available
+                        
+                        print(f"DEBUG: Processing GetUsersRequest result: id={user_obj.id}, has_access_hash={hasattr(user_obj, 'access_hash')}, access_hash={getattr(user_obj, 'access_hash', None)}")
+                        
+                        # Check if user is deleted or empty (min=True)
+                        if is_deleted:
+                            print(f"DEBUG: ❌ User account is deleted, cannot send message")
+                            await client.disconnect()
+                            return False, f'User account is deleted (user_id: {user_id_value})'
+                        
+                        if is_min:
+                            print(f"DEBUG: ❌ User is empty (min=True), cannot send message")
+                            await client.disconnect()
+                            return False, f'User is empty or not accessible (user_id: {user_id_value}, min=True)'
+                        
+                        if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
+                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                            method_used = "GetUsersRequest"
+                            # Cache successful resolution
+                            user_entity_cache[cache_key] = target
+                            print(f"DEBUG: ✓ Got access_hash via GetUsersRequest for ID: {user_id_value} (cached)")
+                        else:
+                            print(f"DEBUG: GetUsersRequest returned user but no access_hash (user_obj type: {type(user_obj)})")
+                            # Check if it's a UserEmpty or similar
+                            if hasattr(user_obj, '__class__'):
+                                print(f"DEBUG: User object class: {user_obj.__class__.__name__}")
+                            
+                            # If user exists but no access_hash, it might still be sendable
+                            # Try to use the user_id directly
+                            if hasattr(user_obj, 'id') and user_obj.id:
+                                print(f"DEBUG: User exists (id={user_obj.id}) but no access_hash, will try direct send")
+                                # Don't set target here, let it fall through to other strategies
+                    else:
+                        print(f"DEBUG: GetUsersRequest returned empty result or failed")
+                except Exception as e:
+                    print(f"DEBUG: GetUsersRequest failed: {e} (type: {type(e)})")
+                    import traceback
+                    print(f"DEBUG: GetUsersRequest traceback: {traceback.format_exc()}")
+            
+            # Strategy 3: Try ResolveUsernameRequest if username is available
+            if not target and user.get('username'):
+                try:
+                    from telethon.tl.functions.contacts import ResolveUsernameRequest
+                    from telethon.tl.types import InputPeerUser
+                    username = user.get('username').strip().lstrip('@')
+                    print(f"DEBUG: Strategy 3: Trying ResolveUsernameRequest for username: {username}")
+                    resolved = await client(ResolveUsernameRequest(username))
+                    if resolved and hasattr(resolved, 'users') and len(resolved.users) > 0:
+                        user_obj = resolved.users[0]
+                        if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
+                            target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                            method_used = "ResolveUsernameRequest"
+                            # Cache successful resolution by both ID and username
+                            user_entity_cache[cache_key] = target
+                            if username:
+                                user_entity_cache[f"username:{username}"] = target
+                            print(f"DEBUG: ✓ Got access_hash via ResolveUsernameRequest for username: {username} (cached)")
+                except Exception as e:
+                    print(f"DEBUG: ResolveUsernameRequest failed: {e}")
+            
+            # Strategy 4: Try GetFullUserRequest as last resort
+            if not target:
+                try:
+                    from telethon.tl.functions.users import GetFullUserRequest
+                    from telethon.tl.types import InputPeerUser, InputUser
+                    print(f"DEBUG: Strategy 4: Trying GetFullUserRequest for ID: {user_id_value}")
+                    # Try with InputUser (access_hash=0 might work for some cases)
+                    try:
+                        input_user = InputUser(user_id=user_id_value, access_hash=0)
+                        full_user = await client(GetFullUserRequest(input_user))
+                        if full_user and hasattr(full_user, 'full_user') and hasattr(full_user.full_user, 'id'):
+                            # GetFullUserRequest doesn't return access_hash directly, but we can try to use the user
+                            print(f"DEBUG: GetFullUserRequest succeeded but doesn't provide access_hash")
+                    except Exception as e:
+                        print(f"DEBUG: GetFullUserRequest failed: {e}")
+                except Exception as e:
+                    print(f"DEBUG: GetFullUserRequest exception: {e}")
+            
+            # Strategy 5: Last resort - try direct send with user_id (sometimes works for known users)
+            if not target:
+                print(f"DEBUG: Strategy 5: Trying direct send with user_id as last resort: {user_id_value}")
+                # Try to send directly - sometimes Telethon can resolve it automatically
+                # This is a fallback that might work if user was previously contacted
+                try:
+                    # Test if we can send by trying a minimal operation first
+                    # Actually, let's just try sending - if it fails, we'll catch the error
+                    target = user_id_value
+                    method_used = "direct_user_id_fallback"
+                    print(f"DEBUG: Using direct user_id as fallback (may fail if access_hash required)")
+                except Exception as e:
+                    print(f"DEBUG: Direct user_id fallback setup failed: {e}")
+            
+            # Strategy 6: Try InputPeerUser with access_hash=0 for spam/outreach
+            # This is specifically for sending to unknown users with correct API credentials
+            # IMPORTANT: This requires API credentials from my.telegram.org that allow messaging unknown users
+            if not target:
+                try:
+                    from telethon.tl.types import InputPeerUser
+                    print(f"DEBUG: Strategy 6: Trying InputPeerUser with access_hash=0 for ID: {user_id_value} (type: {type(user_id_value)})")
+                    print(f"DEBUG: This is for spam/outreach to unknown users")
+                    print(f"DEBUG: Using API credentials: api_id={account_api_id}, api_hash={account_api_hash[:10]}...")
+                    print(f"DEBUG: NOTE: For this to work, API credentials must be from my.telegram.org and allow messaging unknown users")
+                    # CRITICAL: Ensure user_id_value is int for InputPeerUser
+                    if not isinstance(user_id_value, int):
+                        print(f"DEBUG: WARNING: user_id_value is not int in InputPeerUser! Converting...")
+                        user_id_value = int(user_id_value)
+                    # Try to create InputPeerUser with access_hash=0
+                    # This sometimes works if API credentials are correct and user privacy allows
+                    target = InputPeerUser(user_id=user_id_value, access_hash=0)
+                    method_used = "InputPeerUser_access_hash_0"
+                    print(f"DEBUG: Using InputPeerUser(user_id={user_id_value}, access_hash=0) for direct send")
+                    print(f"DEBUG: If this fails, ensure API credentials are correct and allow messaging unknown users")
+                except Exception as e:
+                    print(f"DEBUG: InputPeerUser(access_hash=0) setup failed: {e}")
+            
+            # Strategy 7: Last resort - try InputUser with access_hash=0 and get_entity
+            # Sometimes this works if the user was previously contacted
+            if not target:
+                try:
+                    from telethon.tl.types import InputUser, InputPeerUser
+                    print(f"DEBUG: Strategy 7: Trying InputUser with access_hash=0 for ID: {user_id_value} (type: {type(user_id_value)})")
+                    # CRITICAL: Ensure user_id_value is int for InputUser
+                    if not isinstance(user_id_value, int):
+                        print(f"DEBUG: WARNING: user_id_value is not int in InputUser! Converting...")
+                        user_id_value = int(user_id_value)
+                    # Try to create InputUser with access_hash=0
+                    input_user = InputUser(user_id=user_id_value, access_hash=0)
+                    # Try to get entity using this InputUser
+                    try:
+                        entity = await client.get_entity(input_user)
+                        if hasattr(entity, 'access_hash') and entity.access_hash:
+                            target = InputPeerUser(user_id=entity.id, access_hash=entity.access_hash)
+                            method_used = "InputUser_access_hash_0"
+                            user_entity_cache[cache_key] = target
+                            print(f"DEBUG: ✓ Got access_hash via InputUser(access_hash=0) for ID: {user_id_value} (cached)")
+                    except Exception as e:
+                        print(f"DEBUG: InputUser(access_hash=0) get_entity failed: {e}")
+                        # Still try to use it directly as last resort
+                        target = user_id_value
+                        method_used = "direct_user_id_last_resort"
+                        print(f"DEBUG: Using direct user_id as absolute last resort")
+                except Exception as e:
+                    print(f"DEBUG: InputUser(access_hash=0) setup failed: {e}")
+            
+            # If still no target, we cannot send - need access_hash
+            if not target:
+                await client.disconnect()
+                # Create a more user-friendly error message
+                user_id_display = user.get("user_id", "unknown")
+                username_display = user.get("username", "not provided")
+                phone_display = user.get("phone", "not provided")
+                
+                error_msg = f'User not accessible: {user_id_display}'
+                error_msg += f'\n\nUser details: ID={user_id_display}, Username={username_display}, Phone={phone_display}'
+                error_msg += f'\n\nAll resolution methods failed:'
+                error_msg += f'\n  1. get_entity(user_id) - User not in contacts or never contacted'
+                error_msg += f'\n  2. GetUsersRequest([user_id]) - User not accessible via API'
+                if user.get('username'):
+                    error_msg += f'\n  3. ResolveUsernameRequest(username={user.get("username")}) - Username resolution failed'
+                else:
+                    error_msg += f'\n  3. ResolveUsernameRequest - Skipped (no username provided)'
+                error_msg += f'\n  4. GetFullUserRequest - Failed to get user details'
+                error_msg += f'\n  5. Direct user_id send - Requires access_hash'
+                error_msg += f'\n  6. InputPeerUser(access_hash=0) - Failed (may need correct API credentials)'
+                error_msg += f'\n  7. InputUser(access_hash=0) - User not previously contacted'
+                error_msg += f'\n\nPossible reasons:'
+                error_msg += f'\n  • User has privacy settings that block messages from unknown users'
+                error_msg += f'\n  • User was never contacted by this account before'
+                error_msg += f'\n  • User is not in the account\'s contacts'
+                error_msg += f'\n  • User account may be restricted, deleted, or banned'
+                error_msg += f'\n\nIMPORTANT for spam/outreach to unknown users:'
+                error_msg += f'\n  • API credentials (API ID/HASH) must be from my.telegram.org'
+                error_msg += f'\n  • API credentials must allow messaging unknown users'
+                error_msg += f'\n  • Current API ID: {account_api_id}'
+                error_msg += f'\n  • Session must be created with these same API credentials'
+                error_msg += f'\n  • Check account settings in database: api_id and api_hash must be set correctly'
+                error_msg += f'\n\nSolutions:'
+                error_msg += f'\n  1. Verify API credentials are correct in account settings (api_id={account_api_id})'
+                error_msg += f'\n  2. Ensure session was created with these API credentials'
+                error_msg += f'\n  3. Try re-creating session with correct API credentials from my.telegram.org'
+                error_msg += f'\n  4. Ask the user to add your account to their contacts first'
+                error_msg += f'\n  5. Send a message to this user manually from the Telegram app using account {account.get("phone")}'
+                error_msg += f'\n  6. If username is available, try using it instead of user_id'
+                error_msg += f'\n  7. Check if the user account is active and not restricted'
+                
+                return False, error_msg
 
-                            # Try to get user info to get access_hash
+            # Send message with or without media, using HTML parsing
+            try:
+                if media_path and media_type:
+                    media_file = Path(media_path)
+                    if media_file.exists():
+                        print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
+                        # Send with media
+                        if media_type == 'photo':
+                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        elif media_type == 'video':
+                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                        elif media_type == 'audio':
+                            await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                    else:
+                        print(f"DEBUG: Media file not found: {media_path}")
+                        # File doesn't exist, send text only
+                        await client.send_message(target, message_text, parse_mode='html')
+                else:
+                    # Send text only with HTML formatting
+                    await client.send_message(target, message_text, parse_mode='html')
+                
+                # Log successful method
+                print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
+                await client.disconnect()
+                return True, None
+                
+            except (ValueError, TypeError) as ve:
+                error_str = str(ve)
+                # Check for invalid Peer errors - if we tried direct send, maybe we can still get access_hash
+                if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
+                    print(f"DEBUG: Invalid Peer error with method {method_used}, trying alternative approaches: {error_str}")
+                    # If we used direct_user_id_fallback, try one more time with GetUsersRequest using different approach
+                    if method_used == "direct_user_id_fallback":
+                        try:
+                            from telethon.tl.functions.users import GetUsersRequest
+                            from telethon.tl.types import InputPeerUser
+                            print(f"DEBUG: Retry: Trying GetUsersRequest with plain int for ID: {user_id_value} (type: {type(user_id_value)})")
+                            # CRITICAL: Ensure user_id_value is int, not string
+                            if not isinstance(user_id_value, int):
+                                print(f"DEBUG: WARNING: user_id_value is not int in retry GetUsersRequest! Converting...")
+                                user_id_value = int(user_id_value)
+                            # Try with plain int (not InputUser)
                             users_result = await client(GetUsersRequest([user_id_value]))
                             if users_result and len(users_result) > 0:
                                 user_obj = users_result[0]
-                                target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
-                                print(f"DEBUG: ✓ Found user by ID using GetUsersRequest: {user_id_value}")
-                            else:
-                                error_details.append(f"user_id {user_id_value}: GetUsersRequest returned empty")
-                                print(f"DEBUG: GetUsersRequest returned empty for ID {user_id_value}")
-                        except Exception as e2:
-                            error_details.append(f"user_id {user_id_value}: {str(e2)}")
-                            print(f"DEBUG: GetUsersRequest failed for ID {user_id_value}: {e2}")
-            except (ValueError, TypeError) as e:
-                error_details.append(f"user_id {user.get('user_id')}: invalid format - {str(e)}")
-            except Exception as e:
-                error_details.append(f"user_id {user.get('user_id')}: {str(e)}")
-
-        # Try username if user_id didn't work (fallback from CSV)
-        if not target and user.get('username'):
-            username = user['username'].lstrip('@')
-            user_identifier = f"@{username}"
-            try:
-                target = await client.get_entity(username)
-                print(f"DEBUG: ✓ Found user by username: @{username}")
-            except Exception as e:
-                error_details.append(f"username @{username}: {str(e)}")
-                print(f"DEBUG: Failed to find user by username @{username}: {e}")
-
-        # Try phone as last resort (fallback from CSV)
-        if not target and user.get('phone'):
-            phone_num = user['phone']
-            user_identifier = phone_num
-            try:
-                target = await client.get_entity(phone_num)
-                print(f"DEBUG: ✓ Found user by phone: {phone_num}")
-            except Exception as e:
-                error_details.append(f"phone {phone_num}: {str(e)}")
-                print(f"DEBUG: Failed to find user by phone {phone_num}: {e}")
-
-        if not target:
-            await client.disconnect()
-            error_msg = f'User not found. Tried: {"; ".join(error_details)}' if error_details else 'No valid user identifier provided (need user_id, username or phone)'
-            return False, error_msg
-
-        # Send message with or without media, using HTML parsing
-        try:
-            if media_path and media_type:
-                media_file = Path(media_path)
-                if media_file.exists():
-                    print(f"DEBUG: Sending media file: {media_path} (exists: {media_file.exists()}, size: {media_file.stat().st_size} bytes)")
-                    # Send with media - use file path directly
-                    if media_type == 'photo':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'video':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
-                    elif media_type == 'audio':
-                        await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                if hasattr(user_obj, 'access_hash') and user_obj.access_hash:
+                                    target = InputPeerUser(user_id=user_obj.id, access_hash=user_obj.access_hash)
+                                    method_used = "GetUsersRequest_retry"
+                                    user_entity_cache[cache_key] = target
+                                    print(f"DEBUG: ✓ Got access_hash on retry via GetUsersRequest for ID: {user_id_value}")
+                                    
+                                    # Retry send with proper entity
+                                    if media_path and media_type:
+                                        media_file = Path(media_path)
+                                        if media_file.exists():
+                                            if media_type == 'photo':
+                                                await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                            elif media_type == 'video':
+                                                await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                            elif media_type == 'audio':
+                                                await client.send_file(target, media_file, caption=message_text if message_text else None, parse_mode='html' if message_text else None)
+                                        else:
+                                            await client.send_message(target, message_text, parse_mode='html')
+                                    else:
+                                        await client.send_message(target, message_text, parse_mode='html')
+                                    
+                                    print(f"DEBUG: ✓ Message sent successfully using method: {method_used}")
+                                    await client.disconnect()
+                                    return True, None
+                        except Exception as retry_e:
+                            print(f"DEBUG: Retry GetUsersRequest also failed: {retry_e}")
+                    
+                    await client.disconnect()
+                    return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
+                # Check for InputUserEmpty or similar errors
+                elif "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
+                    print(f"DEBUG: Entity error with method {method_used}: {error_str}")
+                    print(f"DEBUG: User ID: {user_id_value}, Username: {user.get('username')}, Phone: {user.get('phone')}")
+                    await client.disconnect()
+                    
+                    # Create a more user-friendly error message
+                    user_id_display = user.get("user_id", "unknown")
+                    username_display = user.get("username", "not provided")
+                    phone_display = user.get("phone", "not provided")
+                    
+                    error_msg = f'User not accessible: {user_id_display}'
+                    error_msg += f'\n\nUser details: ID={user_id_display}, Username={username_display}, Phone={phone_display}'
+                    if method_used:
+                        error_msg += f'\n\nLast method tried: {method_used}'
+                    error_msg += f'\n\nAll resolution methods failed. This usually means:'
+                    error_msg += f'\n  • User has privacy settings blocking messages from unknown users'
+                    error_msg += f'\n  • User was never contacted by this account before'
+                    error_msg += f'\n  • User is not in the account\'s contacts'
+                    error_msg += f'\n\nIMPORTANT for spam/outreach:'
+                    error_msg += f'\n  • API credentials must be from my.telegram.org and allow messaging unknown users'
+                    error_msg += f'\n  • Current API ID: {account_api_id}'
+                    error_msg += f'\n  • Session must be created with these same API credentials'
+                    error_msg += f'\n\nSolutions:'
+                    error_msg += f'\n  1. Verify API credentials are correct (api_id={account_api_id})'
+                    error_msg += f'\n  2. Ensure session was created with these API credentials'
+                    error_msg += f'\n  3. Try re-creating session with correct API credentials'
+                    error_msg += f'\n  4. Ask the user to add your account to their contacts'
+                    error_msg += f'\n  5. Send a message manually from account {account.get("phone")} first'
+                    error_msg += f'\n  6. Check if the user account is active'
+                    error_msg += f'\n\nError details: {error_str}'
+                    
+                    return False, error_msg
                 else:
-                    print(f"DEBUG: Media file not found: {media_path}")
-                    # File doesn't exist, send text only
-                    await client.send_message(target, message_text, parse_mode='html')
-            else:
-                # Send text only with HTML formatting
-                await client.send_message(target, message_text, parse_mode='html')
+                    # Other ValueError/TypeError, re-raise
+                    raise
             
             await client.disconnect()
             return True, None
-        except ValueError as ve:
-            # Handle "Could not find the input entity" error
-            error_str = str(ve)
-            if "Could not find the input entity" in error_str or "PeerUser" in error_str:
-                await client.disconnect()
-                return False, f'Could not find the input entity for user ID: {user.get("user_id")}. User may not be accessible or may have blocked the account.'
-            else:
-                # Other ValueError, re-raise
-                await client.disconnect()
-                raise
+        except (ValueError, TypeError) as e:
+            error_str = str(e)
+            await client.disconnect()
+            return False, f'Invalid user_id format: {user.get("user_id")} - {error_str}'
 
     except FloodWaitError as e:
         await client.disconnect()
         return False, f'FloodWait: {e.seconds} seconds'
     except UserPrivacyRestrictedError:
         await client.disconnect()
-        return False, 'User privacy settings prevent messaging'
+        # Log privacy restriction for statistics
+        print(f"DEBUG: ✗ User {user.get('user_id')} has privacy settings that prevent messaging from unknown users")
+        return False, 'User privacy settings prevent messaging from unknown users. The user may need to add you to contacts first.'
     except PeerFloodError:
         await client.disconnect()
         return False, 'Peer flood - account limited'
     except Exception as e:
+        error_str = str(e)
+        # Check for invalid Peer errors
+        if "invalid Peer" in error_str or "An invalid Peer was used" in error_str:
+            await client.disconnect()
+            return False, f'User not accessible: {user.get("user_id")}. Invalid Peer - user may not be accessible or may have privacy restrictions. Error: {error_str}'
+        # Check for InputUserEmpty or similar errors
+        elif "InputUserEmpty" in error_str or "Could not find the input entity" in error_str or "PeerUser" in error_str:
+            print(f"DEBUG: General exception handler - Entity error: {error_str}")
+            print(f"DEBUG: User ID: {user.get('user_id')}, Username: {user.get('username')}, Phone: {user.get('phone')}")
+            await client.disconnect()
+            
+            # Create a more user-friendly error message
+            user_id_display = user.get("user_id", "unknown")
+            username_display = user.get("username", "not provided")
+            phone_display = user.get("phone", "not provided")
+            
+            error_msg = f'User not accessible: {user_id_display}'
+            error_msg += f'\n\nUser details: ID={user_id_display}, Username={username_display}, Phone={phone_display}'
+            error_msg += f'\n\nAll resolution methods attempted:'
+            error_msg += f'\n  1. get_entity(user_id) - Failed'
+            error_msg += f'\n  2. GetUsersRequest([user_id]) - Failed'
+            if user.get('username'):
+                error_msg += f'\n  3. ResolveUsernameRequest(username={user.get("username")}) - Failed'
+            else:
+                error_msg += f'\n  3. ResolveUsernameRequest - Skipped (no username)'
+            error_msg += f'\n  4. GetFullUserRequest - Failed'
+            error_msg += f'\n  5. Direct user_id send - Failed'
+            error_msg += f'\n  6. InputPeerUser(access_hash=0) - Failed (may need correct API credentials)'
+            error_msg += f'\n  7. InputUser(access_hash=0) - Failed'
+            error_msg += f'\n\nPossible reasons:'
+            error_msg += f'\n  • User has privacy settings blocking messages from unknown users'
+            error_msg += f'\n  • User was never contacted by this account before'
+            error_msg += f'\n  • User is not in the account\'s contacts'
+            error_msg += f'\n  • User account may be restricted, deleted, or banned'
+            error_msg += f'\n\nIMPORTANT for spam/outreach:'
+            error_msg += f'\n  • API credentials must be from my.telegram.org and allow messaging unknown users'
+            error_msg += f'\n  • Current API ID: {account_api_id}'
+            error_msg += f'\n  • Session must be created with these same API credentials'
+            error_msg += f'\n\nSolutions:'
+            error_msg += f'\n  1. Verify API credentials are correct (api_id={account_api_id})'
+            error_msg += f'\n  2. Ensure session was created with these API credentials'
+            error_msg += f'\n  3. Try re-creating session with correct API credentials'
+            error_msg += f'\n  4. Ask the user to add your account to their contacts'
+            error_msg += f'\n  5. Send a message manually from account {account.get("phone")} first'
+            error_msg += f'\n  6. Check if the user account is active'
+            error_msg += f'\n\nError details: {error_str}'
+            
+            return False, error_msg
         await client.disconnect()
-        return False, str(e)
+        return False, f'Error sending to user {user.get("user_id")}: {error_str}'
 
 
 def run_campaign_task(campaign_id):
@@ -288,7 +783,7 @@ def run_campaign_task(campaign_id):
         
         # Get accounts (exclude limited and unauthorized accounts, but check if they can be restored)
         # Don't reload from file - use in-memory state which is always up-to-date
-        all_accounts = sheets_manager.get_all_accounts()
+        all_accounts = get_all_accounts()
         print(f"DEBUG Campaign {campaign_id}: Found {len(all_accounts)} total accounts in memory")
         accounts = []
         for acc in all_accounts:
@@ -317,7 +812,7 @@ def run_campaign_task(campaign_id):
                                 f'Account {acc_phone} limited status cleared after {hours_since_limit:.1f} hours, restoring to active',
                                 level='info'
                             )
-                            sheets_manager.update_account(acc.get('id'), {
+                            update_account(acc.get('id'), {
                                 'status': 'active',
                                 'last_used_at': datetime.now().isoformat()
                             })
@@ -349,6 +844,20 @@ def run_campaign_task(campaign_id):
 
         # Get users from campaign_users table (new system)
         campaign_users = db.get_campaign_users(campaign_id)
+        
+        # DIAGNOSTIC: Log raw data from database
+        print(f"DEBUG: ===== MIGRATION DIAGNOSTIC: Reading users from SQLite =====")
+        print(f"DEBUG: Total users from DB: {len(campaign_users)}")
+        if campaign_users:
+            print(f"DEBUG: First user sample from DB:")
+            first_user = campaign_users[0]
+            print(f"DEBUG:   Full dict: {first_user}")
+            print(f"DEBUG:   user_id = {first_user.get('user_id')} (type: {type(first_user.get('user_id'))})")
+            print(f"DEBUG:   username = {first_user.get('username')} (type: {type(first_user.get('username'))})")
+            print(f"DEBUG:   phone = {first_user.get('phone')} (type: {type(first_user.get('phone'))})")
+            print(f"DEBUG:   All keys: {list(first_user.keys())}")
+        print(f"DEBUG: ===== END MIGRATION DIAGNOSTIC =====")
+        
         # Filter only pending users
         users = [cu for cu in campaign_users if cu.get('status', 'pending') == 'pending']
 
@@ -387,14 +896,24 @@ def run_campaign_task(campaign_id):
             account_phone = account.get('phone', 'unknown')
 
             # Get user identifier with priority: ID -> Username -> Phone
-            # Ensure user_id is properly formatted (can be string or int from DB)
+            # CRITICAL FIX: Convert user_id from STRING (SQLite TEXT) to INTEGER for Telethon
+            # Telethon requires INTEGER, not STRING for user_id
             user_id_value = user.get('user_id')
             if user_id_value:
-                # Convert to string for display, but keep original for sending
+                # Convert to int - SQLite returns TEXT as string, but Telethon needs int
                 try:
-                    user_id_value = int(user_id_value) if str(user_id_value).isdigit() else user_id_value
-                except:
-                    pass
+                    if isinstance(user_id_value, str):
+                        user_id_value = int(user_id_value.strip())
+                    elif isinstance(user_id_value, int):
+                        user_id_value = user_id_value  # Already int
+                    else:
+                        user_id_value = int(str(user_id_value).strip())
+                    print(f"DEBUG: ✓ Converted user_id to int: {user_id_value} (type: {type(user_id_value)})")
+                except (ValueError, TypeError) as e:
+                    print(f"DEBUG: ERROR: Cannot convert user_id to int: {user_id_value} (type: {type(user_id_value)}). Error: {e}")
+                    user_id_value = None  # Will fall back to username/phone
+            else:
+                user_id_value = None
             
             user_identifier = user_id_value or user.get('username') or user.get('phone') or 'unknown'
             identifier_type = 'ID' if user_id_value else ('Username' if user.get('username') else 'Phone')
@@ -481,7 +1000,7 @@ def run_campaign_task(campaign_id):
                     # Update account stats
                     daily_sent = int(account.get('daily_sent', 0)) + 1
                     total_sent = int(account.get('total_sent', 0)) + 1
-                    sheets_manager.update_account(account.get('id'), {
+                    update_account(account.get('id'), {
                         'daily_sent': daily_sent,
                         'total_sent': total_sent,
                         'last_used_at': datetime.now().isoformat()
@@ -514,7 +1033,7 @@ def run_campaign_task(campaign_id):
                             level='warning'
                         )
                         # Mark account as limited and move to next account
-                        sheets_manager.update_account(account.get('id'), {
+                        update_account(account.get('id'), {
                             'status': 'limited',
                             'last_used_at': datetime.now().isoformat()
                         })
@@ -531,7 +1050,7 @@ def run_campaign_task(campaign_id):
                             level='warning'
                         )
                         # Mark account as limited and move to next account
-                        sheets_manager.update_account(account.get('id'), {
+                        update_account(account.get('id'), {
                             'status': 'limited',
                             'last_used_at': datetime.now().isoformat()
                         })
@@ -660,10 +1179,10 @@ def dashboard():
     user_id = session['user_id']
 
     # Get accounts
-    accounts = sheets_manager.get_all_accounts()
+    accounts = get_all_accounts()
 
-    # Get users for outreach
-    users = sheets_manager.users
+    # Get users for outreach from database
+    users = db.get_all_campaign_users()
 
     # Get recent campaigns
     campaigns = db.get_user_campaigns(user_id, limit=10)
@@ -740,8 +1259,8 @@ def new_campaign():
         if not message and not media_path:
             flash('Please provide either a message or media file', 'warning')
             # Get accounts and users for form
-            accounts = sheets_manager.get_all_accounts()
-            users = sheets_manager.users
+            accounts = get_all_accounts()
+            users = db.get_all_campaign_users()
             return render_template('new_campaign.html', accounts=accounts, users=users)
 
         # Get selected accounts (form sends phone numbers, not IDs)
@@ -749,7 +1268,7 @@ def new_campaign():
         print(f"DEBUG: Selected account phones from form: {account_phones}")
         
         # Validate that phones exist in available accounts
-        all_accounts = sheets_manager.get_all_accounts()
+        all_accounts = get_all_accounts()
         print(f"DEBUG: Total accounts available: {len(all_accounts)}")
         valid_account_phones = []
         for phone in account_phones:
@@ -805,16 +1324,16 @@ def new_campaign():
                 new_account_id = f"acc_{phone_clean}_{campaign_id}"
                 
                 # Update account with new ID and campaign_id
-                sheets_manager.update_account(account_id, {
-                        'new_id': new_account_id,
-                        'campaign_id': campaign_id
-                    })
+                update_account(account_id, {
+                    'new_id': new_account_id,
+                    'campaign_id': campaign_id
+                })
         flash('Campaign created! Starting...', 'success')
         return redirect(url_for('campaign_detail', campaign_id=campaign_id))
 
     # Get accounts and users for form
-    accounts = sheets_manager.get_all_accounts()
-    users = sheets_manager.users
+    accounts = get_all_accounts()
+    users = db.get_all_campaign_users()
     proxies = proxy_manager.get_all_proxies()
 
     # Debug: log all accounts being sent to template
@@ -976,13 +1495,13 @@ def find_account_by_id_or_phone(account_id: str):
     This handles cases where account ID was changed (e.g., acc_{phone}_{campaign_id})
     """
     # First try to find by exact ID
-    account = sheets_manager.get_account(account_id)
+    account = get_account(account_id)
     if account:
         return account
     
     # If not found, try to extract phone from ID format: acc_{phone}_{campaign_id}
     # or find among all accounts by matching phone
-    all_accounts = sheets_manager.get_all_accounts()
+    all_accounts = get_all_accounts()
     
     # Try to extract phone from ID if it follows the pattern acc_{phone}_{campaign_id}
     if account_id.startswith('acc_'):
@@ -1264,7 +1783,7 @@ def accounts_list():
     """List all accounts"""
     # Don't reload from file here - it overwrites in-memory changes
     # Only load on startup, changes are saved immediately
-    accounts = sheets_manager.get_all_accounts()
+    accounts = get_all_accounts()
 
     print(f"DEBUG: Found {len(accounts)} accounts in storage")
     for i, acc in enumerate(accounts):
@@ -1300,10 +1819,10 @@ def accounts_list():
 
 @app.route('/accounts/delete/<account_id>', methods=['POST'])
 @login_required
-def delete_account(account_id):
+def delete_account_route(account_id):
     """Delete account"""
     try:
-        success = sheets_manager.delete_account(account_id)
+        success = delete_account(account_id)  # Call the helper function, not itself
         
         if success:
             flash(f'Account {account_id} deleted successfully', 'success')
@@ -1320,7 +1839,7 @@ def delete_account(account_id):
 def get_account_profile_photo(account_id):
     """Get account profile photo"""
     try:
-        account = sheets_manager.get_account(account_id)
+        account = get_account(account_id)
         if not account:
             # Return 1x1 transparent pixel as placeholder
             from io import BytesIO
@@ -1389,7 +1908,7 @@ def get_account_profile_photo(account_id):
 @login_required
 def edit_account(account_id):
     """Edit account profile"""
-    account = sheets_manager.get_account(account_id)
+    account = get_account(account_id)
     
     if not account:
         flash('Account not found', 'danger')
@@ -1512,7 +2031,7 @@ def edit_account(account_id):
                     update_data['photo_count'] = result.get('photo_count', 0)
                 
                 print(f"DEBUG: Updating account with data: {update_data}")
-                sheets_manager.update_account(account_id, update_data)
+                update_account(account_id, update_data)
                 
                 flash('Profile updated successfully!', 'success')
             else:
@@ -1545,12 +2064,24 @@ def add_account_tdata():
         
         # Save uploaded file
         upload_dir = Path(__file__).parent / 'uploads' / 'accounts'
-        upload_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            # Ensure directory is writable
+            if not os.access(upload_dir, os.W_OK):
+                os.chmod(upload_dir, 0o755)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Failed to create upload directory: {str(e)}'}), 500
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"{timestamp}_{file.filename}"
         filepath = upload_dir / filename
-        file.save(str(filepath))
+        
+        try:
+            file.save(str(filepath))
+            # Ensure file is readable
+            os.chmod(filepath, 0o644)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Failed to save uploaded file: {str(e)}'}), 500
         
         # Import converter functions
         from converter import detect_and_process
@@ -1569,15 +2100,41 @@ def add_account_tdata():
                 with open(filepath, 'r') as f:
                     creds = json.load(f)
                 
+                # Support multiple JSON formats:
+                # Standard: api_id, api_hash
+                # TelegramExpert.pro: app_id, app_hash
                 phone = creds.get('phone')
-                api_id = int(creds.get('api_id'))
-                api_hash = creds.get('api_hash')
-                password = creds.get('password')
+                api_id_str = creds.get('api_id') or creds.get('app_id')  # Support both formats
+                api_hash = creds.get('api_hash') or creds.get('app_hash')  # Support both formats
+                password = creds.get('password') or creds.get('twoFA')  # Support both password fields
+                
+                # Validate required fields
+                if not phone:
+                    return {'success': False, 'error': 'Phone number is required in JSON file (field: phone)'}
+                if not api_id_str:
+                    return {'success': False, 'error': 'API ID is required in JSON file (field: api_id or app_id)'}
+                if not api_hash:
+                    return {'success': False, 'error': 'API Hash is required in JSON file (field: api_hash or app_hash)'}
+                
+                try:
+                    api_id = int(api_id_str)
+                except (ValueError, TypeError):
+                    return {'success': False, 'error': f'Invalid API ID format: {api_id_str}. Must be a number.'}
                 
                 sessions_dir = Path(__file__).parent / 'sessions'
-                sessions_dir.mkdir(exist_ok=True)
+                try:
+                    sessions_dir.mkdir(parents=True, exist_ok=True)
+                    # Ensure directory is writable
+                    if not os.access(sessions_dir, os.W_OK):
+                        os.chmod(sessions_dir, 0o755)
+                except Exception as e:
+                    return {'success': False, 'error': f'Failed to create sessions directory: {str(e)}'}
+                
                 session_file = sessions_dir / f"{phone.replace('+', '')}.session"
                 
+                # CRITICAL: Use API credentials from JSON file - session must be created with these credentials
+                # Telethon requires that session file and API credentials match
+                print(f"DEBUG: Using API credentials from JSON file: api_id={api_id}, api_hash={api_hash[:10]}...")
                 client = TelegramClient(str(session_file.with_suffix('')), api_id, api_hash)
                 
                 try:
@@ -1588,6 +2145,19 @@ def add_account_tdata():
                     me = await client.get_me()
                     await client.disconnect()
                     
+                    # Check if account already exists by phone BEFORE adding
+                    existing_accounts = get_all_accounts()
+                    phone_from_me = me.phone or phone
+                    phone_normalized_check = phone_from_me.replace('+', '').replace(' ', '').replace('-', '').strip()
+                    for existing in existing_accounts:
+                        existing_phone = existing.get('phone', '').replace('+', '').replace(' ', '').replace('-', '').strip()
+                        if existing_phone == phone_normalized_check:
+                            return {'success': False, 'error': f'Account with phone {phone_from_me} already exists (ID: {existing.get("id")})'}
+                    
+                    # CRITICAL: Store the API credentials that were used to create the session
+                    # These must match when connecting to the session later
+                    print(f"DEBUG: Storing API credentials used to create session: api_id={api_id}, api_hash={api_hash[:10]}...")
+                    
                     account_data = {
                         'phone': me.phone,
                         'username': me.username or '',
@@ -1595,7 +2165,9 @@ def add_account_tdata():
                         'last_name': me.last_name or '',
                         'session_file': str(session_file),
                         'status': 'active',
-                        'notes': notes or 'Web added from JSON'
+                        'notes': notes or 'Web added from JSON',
+                        'api_id': api_id,  # CRITICAL: Store credentials used to create session
+                        'api_hash': api_hash  # CRITICAL: Store credentials used to create session
                     }
                     
                     add_result = await add_account(account_data)
@@ -1609,6 +2181,32 @@ def add_account_tdata():
                 
                 if result['success']:
                     account_data = result['account']
+                    
+                    # Check if account already exists by phone
+                    existing_accounts = get_all_accounts()
+                    phone_from_result = account_data.get('phone', '')
+                    phone_normalized_check = phone_from_result.replace('+', '').replace(' ', '').replace('-', '').strip()
+                    for existing in existing_accounts:
+                        existing_phone = existing.get('phone', '').replace('+', '').replace(' ', '').replace('-', '').strip()
+                        if existing_phone == phone_normalized_check:
+                            return {'success': False, 'error': f'Account with phone {phone_from_result} already exists (ID: {existing.get("id")})'}
+                    
+                    # CRITICAL: Keep the API credentials from converter - they were used to create the session
+                    # Telethon requires that session file and API credentials match
+                    # Only set config values if converter didn't provide them
+                    if not account_data.get('api_id') or not account_data.get('api_hash'):
+                        print(f"DEBUG: Converter didn't provide API credentials, using config: api_id={config.API_ID}, api_hash={config.API_HASH[:10]}...")
+                        account_data['api_id'] = config.API_ID
+                        account_data['api_hash'] = config.API_HASH
+                    else:
+                        print(f"DEBUG: Using API credentials from converter: api_id={account_data.get('api_id')}, api_hash={account_data.get('api_hash', '')[:10]}...")
+                        print(f"DEBUG: These credentials were used to create the session file")
+                    
+                    # Ensure all required fields have defaults
+                    account_data.setdefault('last_name', '')
+                    account_data.setdefault('username', '')
+                    account_data.setdefault('first_name', '')
+                    
                     add_result = await add_account(account_data)
                     return add_result
                 else:
@@ -1618,7 +2216,7 @@ def add_account_tdata():
         
         # Verify account was added (don't reload - in-memory state is correct)
         if result.get('success'):
-            accounts_after = sheets_manager.get_all_accounts()
+            accounts_after = get_all_accounts()
             print(f"DEBUG: Accounts after addition: {len(accounts_after)}")
             result['accounts_count'] = len(accounts_after)
         
@@ -1669,6 +2267,9 @@ def add_account_manual():
             sessions_dir.mkdir(exist_ok=True)
             session_file = sessions_dir / f"{session_name}.session"
             
+            # CRITICAL: Use API credentials from form - session must be created with these credentials
+            # Telethon requires that session file and API credentials match
+            print(f"DEBUG: Using API credentials from form for manual account: api_id={api_id}, api_hash={api_hash[:10]}...")
             client = TelegramClient(str(session_file.with_suffix('')), api_id, api_hash)
             
             try:
@@ -1682,6 +2283,18 @@ def add_account_manual():
                 me = await client.get_me()
                 await client.disconnect()
                 
+                # Check if account already exists by phone
+                existing_accounts = get_all_accounts()
+                phone_normalized_check = phone_normalized
+                for existing in existing_accounts:
+                    existing_phone = existing.get('phone', '').replace('+', '').replace(' ', '').replace('-', '').strip()
+                    if existing_phone == phone_normalized_check:
+                        return {'success': False, 'error': f'Account with phone {phone} already exists (ID: {existing.get("id")})'}
+                
+                # CRITICAL: Store the API credentials that were used to create the session
+                # These must match when connecting to the session later
+                print(f"DEBUG: Storing API credentials used to create session: api_id={api_id}, api_hash={api_hash[:10]}...")
+                
                 account_data = {
                     'phone': me.phone,
                     'username': me.username or '',
@@ -1689,7 +2302,9 @@ def add_account_manual():
                     'last_name': me.last_name or '',
                     'session_file': str(session_file),
                     'status': 'active',
-                    'notes': notes or 'Web added manually'
+                    'notes': notes or 'Web added manually',
+                    'api_id': api_id,  # CRITICAL: Store credentials used to create session
+                    'api_hash': api_hash  # CRITICAL: Store credentials used to create session
                 }
                 
                 add_result = await add_account(account_data)
@@ -1706,7 +2321,7 @@ def add_account_manual():
         
         # Verify account was added (don't reload - in-memory state is correct)
         if result.get('success'):
-            accounts_after = sheets_manager.get_all_accounts()
+            accounts_after = get_all_accounts()
             print(f"DEBUG: Accounts after manual addition: {len(accounts_after)}")
             result['accounts_count'] = len(accounts_after)
         
@@ -1806,10 +2421,9 @@ def add_account_authkey():
         
         result = asyncio.run(process())
         
-        # Verify account was added and reload data
+        # Verify account was added
         if result.get('success'):
-            sheets_manager._load_from_file()
-            accounts_after = sheets_manager.get_all_accounts()
+            accounts_after = get_all_accounts()
             print(f"DEBUG: Accounts after authkey addition: {len(accounts_after)}")
             result['accounts_count'] = len(accounts_after)
         
@@ -1824,7 +2438,7 @@ def add_account_authkey():
 def delete_account_photos(account_id):
     """Delete all profile photos from account"""
     try:
-        account = sheets_manager.get_account(account_id)
+        account = get_account(account_id)
         
         if not account:
             return jsonify({'success': False, 'error': 'Account not found'})
@@ -1933,15 +2547,37 @@ def add_user():
         flash('Please provide at least username, user ID, or phone number', 'danger')
         return redirect(url_for('users_list'))
 
-    user_data = {
-        'username': username if username else None,
-        'user_id': user_id_int,
-        'phone': phone if phone else None,
-        'priority': priority_int,
-        'status': 'pending'
-    }
-
-    sheets_manager.add_user(user_data)
+    # For users added without campaign, we need to create a default campaign or use existing
+    # For now, we'll add to a default campaign (campaign_id = 0 means "general users")
+    # Or we can create a special "General Users" campaign
+    user_id = session['user_id']
+    
+    # Get or create a default campaign for general users
+    default_campaign = None
+    campaigns = db.get_user_campaigns(user_id)
+    for campaign in campaigns:
+        if campaign.get('name') == 'General Users':
+            default_campaign = campaign
+            break
+    
+    if not default_campaign:
+        # Create default campaign
+        campaign_id = db.create_campaign(
+            user_id=user_id,
+            name='General Users',
+            total_users=0
+        )
+    else:
+        campaign_id = default_campaign['id']
+    
+    # Add user to campaign
+    db.add_campaign_user(
+        campaign_id=campaign_id,
+        username=username if username else None,
+        user_id=str(user_id_int) if user_id_int else None,
+        phone=phone if phone else None,
+        priority=priority_int
+    )
 
     flash('User added successfully', 'success')
     return redirect(url_for('users_list'))
@@ -1958,7 +2594,21 @@ def bulk_delete_users():
         if not user_ids:
             return jsonify({'success': False, 'error': 'No users selected'})
         
-        count = sheets_manager.delete_users(user_ids)
+        # Delete users from all campaigns
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        count = 0
+        try:
+            for user_id in user_ids:
+                cursor.execute('DELETE FROM campaign_users WHERE id = ?', (user_id,))
+                if cursor.rowcount > 0:
+                    count += 1
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            return jsonify({'success': False, 'error': str(e)})
+        finally:
+            conn.close()
         
         return jsonify({'success': True, 'count': count})
     except Exception as e:
@@ -2097,8 +2747,32 @@ def import_csv_users():
                 skipped += 1
                 continue
 
-            user_data['status'] = 'pending'
-            sheets_manager.add_user(user_data)
+            # Get or create default campaign for general users
+            user_id = session['user_id']
+            default_campaign = None
+            campaigns = db.get_user_campaigns(user_id)
+            for campaign in campaigns:
+                if campaign.get('name') == 'General Users':
+                    default_campaign = campaign
+                    break
+            
+            if not default_campaign:
+                campaign_id = db.create_campaign(
+                    user_id=user_id,
+                    name='General Users',
+                    total_users=0
+                )
+            else:
+                campaign_id = default_campaign['id']
+            
+            # Add user to campaign
+            db.add_campaign_user(
+                campaign_id=campaign_id,
+                username=user_data.get('username'),
+                user_id=str(user_data.get('user_id')) if user_data.get('user_id') else None,
+                phone=user_data.get('phone'),
+                priority=user_data.get('priority', 1)
+            )
             count += 1
 
         print(f"✓ Import complete: {count} users imported, {skipped} skipped")
@@ -2253,8 +2927,8 @@ def check_proxy_ips():
 @login_required
 def api_stats():
     """Get system stats (JSON)"""
-    accounts = sheets_manager.get_all_accounts()
-    users = sheets_manager.users
+    accounts = get_all_accounts()
+    users = db.get_all_campaign_users()
     user_id = session['user_id']
     campaigns = db.get_user_campaigns(user_id)
 

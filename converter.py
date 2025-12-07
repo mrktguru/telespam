@@ -98,7 +98,9 @@ async def process_tdata(zip_path: str, notes: str = "") -> Dict:
                 "last_name": me.last_name,
                 "session_file": str(final_session),
                 "status": config.AccountStatus.WARMING,
-                "notes": notes
+                "notes": notes,
+                "api_id": config.API_ID,  # Store API credentials used to create session
+                "api_hash": config.API_HASH  # Store API credentials used to create session
             }
         }
 
@@ -184,7 +186,9 @@ async def process_session_file(session_path: str, notes: str = "") -> Dict:
                 "last_name": me.last_name,
                 "session_file": str(final_session),
                 "status": config.AccountStatus.WARMING,
-                "notes": notes
+                "notes": notes,
+                "api_id": config.API_ID,  # Store API credentials used to create session
+                "api_hash": config.API_HASH  # Store API credentials used to create session
             }
         }
 

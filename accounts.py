@@ -10,7 +10,7 @@ from telethon.errors import (
     PhoneNumberBannedError
 )
 import config
-from sheets_loader import sheets_manager
+from database import db
 from proxy import get_client
 from uuid import uuid4
 
@@ -27,16 +27,25 @@ async def check_account_status(account_id: str) -> Dict:
     """
 
     try:
-        # Get account from sheets
-        account = sheets_manager.get_account(account_id)
+        # Get account from database
+        account = db.get_account(account_id)
         if not account:
             return {
                 "success": False,
                 "error": "Account not found"
             }
 
-        # Get settings for proxy
-        settings = sheets_manager.get_settings()
+        # Get settings for proxy from config
+        settings = {
+            "proxy_enabled": config.PROXY_ENABLED,
+            "default_proxy_type": config.DEFAULT_PROXY_TYPE,
+            "default_proxy_host": config.DEFAULT_PROXY_HOST,
+            "default_proxy_port": config.DEFAULT_PROXY_PORT,
+            "default_proxy_user": config.DEFAULT_PROXY_USER,
+            "default_proxy_pass": config.DEFAULT_PROXY_PASS,
+            "api_id": config.API_ID,
+            "api_hash": config.API_HASH
+        }
 
         # Create client
         client = await get_client(account, settings)
@@ -57,8 +66,8 @@ async def check_account_status(account_id: str) -> Dict:
 
         await client.disconnect()
 
-        # Update status in sheets
-        sheets_manager.update_account(account_id, {
+        # Update status in database
+        db.update_account(account_id, {
             "status": config.AccountStatus.ACTIVE,
             "last_used_at": datetime.now().isoformat()
         })
@@ -76,7 +85,7 @@ async def check_account_status(account_id: str) -> Dict:
 
     except PhoneNumberBannedError:
         # Account is banned
-        sheets_manager.update_account(account_id, {
+        db.update_account(account_id, {
             "status": config.AccountStatus.BANNED
         })
         return {
@@ -87,7 +96,7 @@ async def check_account_status(account_id: str) -> Dict:
 
     except SessionExpiredError:
         # Session expired
-        sheets_manager.update_account(account_id, {
+        db.update_account(account_id, {
             "status": config.AccountStatus.BANNED
         })
         return {
@@ -117,20 +126,20 @@ async def select_account_for_user(user_id: int, preferred_account_id: Optional[s
 
     # If preferred account is specified, check if it's available
     if preferred_account_id:
-        account = sheets_manager.get_account(preferred_account_id)
+        account = db.get_account(preferred_account_id)
         if account and is_account_available(account):
             return account
 
-    # Check if we already have a dialog with this user
-    dialog = sheets_manager.get_dialog(user_id)
-    if dialog and dialog.get('account_id'):
+    # Check if we already have a conversation with this user
+    conversation = db.get_conversation_by_user_id(str(user_id))
+    if conversation and conversation.get('account_id'):
         # Use the same account for continuity
-        account = sheets_manager.get_account(dialog['account_id'])
+        account = db.get_account(conversation['account_id'])
         if account and is_account_available(account):
             return account
 
     # Get available accounts
-    available = sheets_manager.get_available_accounts()
+    available = get_available_accounts(limit=10)
 
     if not available:
         return None
@@ -175,6 +184,28 @@ def is_account_available(account: Dict) -> bool:
     return True
 
 
+def get_available_accounts(limit: int = 10) -> List[Dict]:
+    """
+    Get accounts available for sending
+
+    Args:
+        limit: Maximum number of accounts to return
+
+    Returns:
+        List of available account dicts
+    """
+    accounts = db.get_all_accounts()
+    
+    # Filter available accounts
+    available = [acc for acc in accounts if is_account_available(acc)]
+    
+    # Sort by daily_sent (ascending) to balance load
+    available.sort(key=lambda x: int(x.get('daily_sent', 0)))
+    
+    # Return limited number
+    return available[:limit]
+
+
 def increment_account_usage(account_id: str):
     """
     Increment account usage counters
@@ -183,14 +214,14 @@ def increment_account_usage(account_id: str):
         account_id: Account ID
     """
 
-    account = sheets_manager.get_account(account_id)
+    account = db.get_account(account_id)
     if not account:
         return
 
     daily_sent = int(account.get('daily_sent', 0)) + 1
     total_sent = int(account.get('total_sent', 0)) + 1
 
-    sheets_manager.update_account(account_id, {
+    db.update_account(account_id, {
         "daily_sent": daily_sent,
         "total_sent": total_sent,
         "last_used_at": datetime.now().isoformat()
@@ -211,10 +242,10 @@ def set_account_cooldown(account_id: str, hours: Optional[int] = None):
 
     cooldown_until = datetime.now() + timedelta(hours=hours)
 
-    account = sheets_manager.get_account(account_id)
+    account = db.get_account(account_id)
     flood_count = int(account.get('flood_count', 0)) + 1 if account else 1
 
-    sheets_manager.update_account(account_id, {
+    db.update_account(account_id, {
         "status": config.AccountStatus.COOLDOWN,
         "cooldown_until": cooldown_until.isoformat(),
         "flood_count": flood_count
@@ -230,7 +261,7 @@ def generate_account_id() -> str:
     """
 
     # Get existing accounts to find next ID
-    accounts = sheets_manager.get_all_accounts()
+    accounts = db.get_all_accounts()
 
     # Extract numeric IDs
     max_id = 0
@@ -261,15 +292,30 @@ async def add_account(account_data: Dict) -> Dict:
         # Generate account ID
         account_id = generate_account_id()
 
+        # CRITICAL: Store the API credentials that were used to create the session
+        # Telethon requires that session file and API credentials match
+        # Use credentials from account_data if provided, otherwise fallback to config
+        api_id_to_store = account_data.get('api_id') or config.API_ID
+        api_hash_to_store = account_data.get('api_hash') or config.API_HASH
+        
+        # Log which credentials are being stored
+        if account_data.get('api_id'):
+            print(f"DEBUG: Storing API credentials from account_data: api_id={api_id_to_store}, api_hash={api_hash_to_store[:10] if api_hash_to_store else 'None'}...")
+        else:
+            print(f"DEBUG: No API credentials in account_data, using config: api_id={api_id_to_store}, api_hash={api_hash_to_store[:10] if api_hash_to_store else 'None'}...")
+        
         # Prepare account record
         account = {
             "id": account_id,
             "phone": account_data.get('phone'),
             "username": account_data.get('username', ''),
             "first_name": account_data.get('first_name', ''),
+            "last_name": account_data.get('last_name', ''),
             "session_file": account_data.get('session_file'),
             "status": account_data.get('status', config.AccountStatus.WARMING),
             "notes": account_data.get('notes', ''),
+            "api_id": str(api_id_to_store) if api_id_to_store else None,  # CRITICAL: Store credentials used to create session
+            "api_hash": api_hash_to_store,  # CRITICAL: Store credentials used to create session
             "use_proxy": False,
             "proxy_type": "",
             "proxy_host": "",
@@ -278,32 +324,52 @@ async def add_account(account_data: Dict) -> Dict:
             "proxy_pass": ""
         }
 
-        # Add to sheets
-        success = sheets_manager.add_account(account)
+        # Add to database
+        from database import db
+        from datetime import datetime
+        import traceback
+        
+        # Ensure all required fields
+        account['added_at'] = account.get('added_at', datetime.now().isoformat())
+        account['last_used_at'] = account.get('last_used_at', datetime.now().isoformat())
+        account['daily_sent'] = account.get('daily_sent', 0)
+        account['total_sent'] = account.get('total_sent', 0)
+        account['flood_count'] = account.get('flood_count', 0)
+        
+        # Log account data before adding (for debugging)
+        print(f"DEBUG: Adding account to database: id={account.get('id')}, phone={account.get('phone')}, api_id={account.get('api_id')}")
+        
+        try:
+            success = db.add_account(account)
+        except Exception as db_error:
+            error_trace = traceback.format_exc()
+            print(f"ERROR: Database error when adding account: {db_error}")
+            print(f"ERROR: Traceback: {error_trace}")
+            return {
+                "success": False,
+                "error": f"Database error: {str(db_error)}"
+            }
 
         if success:
-            # Log the addition
-            sheets_manager.add_log({
-                "account_id": account_id,
-                "action": "account_added",
-                "result": "success",
-                "details": f"Account {account['phone']} added"
-            })
-
+            print(f"DEBUG: Account {account.get('id')} added successfully")
             return {
                 "success": True,
                 "account": account
             }
         else:
+            print(f"ERROR: db.add_account returned False for account {account.get('id')}")
             return {
                 "success": False,
-                "error": "Failed to add account to sheets"
+                "error": "Failed to add account to database (db.add_account returned False)"
             }
 
     except Exception as e:
+        error_trace = traceback.format_exc()
+        print(f"ERROR: Exception in add_account: {e}")
+        print(f"ERROR: Traceback: {error_trace}")
         return {
             "success": False,
-            "error": str(e)
+            "error": f"Error: {str(e)}"
         }
 
 
@@ -320,7 +386,7 @@ async def delete_account(account_id: str) -> Dict:
 
     try:
         # Get account
-        account = sheets_manager.get_account(account_id)
+        account = db.get_account(account_id)
         if not account:
             return {
                 "success": False,
@@ -332,19 +398,26 @@ async def delete_account(account_id: str) -> Dict:
         if session_file:
             Path(session_file).unlink(missing_ok=True)
 
-        # TODO: Delete from sheets (sheets_manager doesn't have delete method yet)
-        # For now, just set status to banned
-        sheets_manager.update_account(account_id, {
-            "status": config.AccountStatus.BANNED
-        })
+        # Delete from database
+        success = db.delete_account(account_id)
+        if not success:
+            return {
+                "success": False,
+                "error": "Failed to delete account"
+            }
 
-        # Log the deletion
-        sheets_manager.add_log({
-            "account_id": account_id,
-            "action": "account_deleted",
-            "result": "success",
-            "details": f"Account {account.get('phone')} deleted"
-        })
+        # Log the deletion to database (if there are active campaigns)
+        try:
+            campaigns = db.get_all_campaigns()
+            for campaign in campaigns:
+                db.add_campaign_log(
+                    campaign['id'],
+                    f"Account {account.get('phone')} deleted",
+                    level='info',
+                    details=f"Account ID: {account_id}"
+                )
+        except:
+            pass
 
         return {
             "success": True,

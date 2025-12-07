@@ -10,10 +10,8 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime
 
-# Set mock storage mode
-os.environ['USE_MOCK_STORAGE'] = 'true'
-
-from mock_sheets import sheets_manager
+# Use database for accounts
+from database import db
 
 
 async def create_session_file(session_path: str, auth_key: bytes, dc_id: int):
@@ -247,7 +245,7 @@ async def add_account_from_session_data():
             'dc_id': dc_id
         }
 
-        sheets_manager.add_account(account_data)
+        db.add_account(account_data)
 
         print("=" * 70)
         print("🎉 SUCCESS! Account added to system")

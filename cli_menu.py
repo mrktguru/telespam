@@ -8,10 +8,8 @@ import sys
 import os
 import subprocess
 
-# Set mock storage mode
-os.environ['USE_MOCK_STORAGE'] = 'true'
-
-from mock_sheets import sheets_manager
+# Use database for accounts
+from database import db
 
 
 def print_header(text):
@@ -37,15 +35,44 @@ def show_dashboard():
 
     print_header("DASHBOARD")
 
-    accounts = sheets_manager.get_all_accounts()
-    users = sheets_manager.users
-    dialogs = sheets_manager.dialogs
-    logs = sheets_manager.logs[-10:]  # Last 10 logs
+    accounts = db.get_all_accounts()
+    
+    # Get users from database
+    try:
+        users = db.get_all_campaign_users()
+    except:
+        users = []
+    
+    # Get dialogs from database (campaign conversations)
+    try:
+        # Get all campaigns to find conversations
+        campaigns = db.get_all_campaigns()
+        dialogs = []
+        for campaign in campaigns:
+            conversations = db.get_campaign_conversations(campaign['id'])
+            dialogs.extend(conversations)
+    except:
+        dialogs = []
+    
+    # Get recent logs from database (campaign logs)
+    try:
+        all_logs = []
+        campaigns = db.get_all_campaigns()
+        for campaign in campaigns:
+            logs = db.get_campaign_logs(campaign['id'], limit=10)
+            all_logs.extend(logs)
+        # Sort by timestamp and get last 10
+        all_logs.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        logs = all_logs[:10]
+    except:
+        logs = []
 
     # Accounts summary
     print("\n📱 ACCOUNTS:")
     if accounts:
-        available = sheets_manager.get_available_accounts()
+        # Filter available accounts manually
+        from accounts import is_account_available
+        available = [acc for acc in accounts if is_account_available(acc)]
         print(f"   Total: {len(accounts)} | Available: {len(available)}")
         for acc in accounts[:5]:
             status_icon = "🟢" if acc.get('status') == 'active' else "🟡" if acc.get('status') == 'warming' else "🔴"
@@ -145,7 +172,18 @@ async def main_menu():
             run_script("add_users_cli.py")
 
         elif choice == "3":
-            sheets_manager.print_summary()
+            # Show database summary
+            accounts = db.get_all_accounts()
+            campaigns = db.get_all_campaigns()
+            users = db.get_all_campaign_users()
+            
+            print("\n" + "=" * 70)
+            print("  SYSTEM STATUS".center(70))
+            print("=" * 70)
+            print(f"\n📱 Accounts: {len(accounts)}")
+            print(f"📋 Campaigns: {len(campaigns)}")
+            print(f"👥 Users: {len(users)}")
+            print()
             input("\nPress Enter to continue...")
 
         elif choice == "3a" or choice.lower() == "3a":
@@ -190,8 +228,22 @@ async def main_menu():
         elif choice == "10":
             confirm = input("⚠️  Clear ALL data? (yes/no): ").strip().lower()
             if confirm == 'yes':
-                sheets_manager.clear_all_data()
-                print_success("All data cleared")
+                # Clear all data from database
+                conn = db.get_connection()
+                cursor = conn.cursor()
+                try:
+                    cursor.execute('DELETE FROM campaign_users')
+                    cursor.execute('DELETE FROM campaign_messages')
+                    cursor.execute('DELETE FROM campaign_conversations')
+                    cursor.execute('DELETE FROM campaign_logs')
+                    cursor.execute('DELETE FROM campaigns')
+                    cursor.execute('DELETE FROM accounts')
+                    conn.commit()
+                    print_success("All data cleared from database")
+                except Exception as e:
+                    print_error(f"Error clearing data: {e}")
+                finally:
+                    conn.close()
             else:
                 print_info("Cancelled")
 
@@ -214,7 +266,7 @@ def main():
     print_header("🚀 TELEGRAM OUTREACH SYSTEM")
     print()
     print_info("CLI Mode - All operations through terminal")
-    print_info("Data stored in: test_data.json")
+    print_info("Data stored in: SQLite database (telespam.db)")
     print()
 
     try:
