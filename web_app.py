@@ -4,7 +4,8 @@ Web Interface - Flask application for Telegram Outreach System
 """
 
 import os
-os.environ['USE_MOCK_STORAGE'] = 'true'
+# IMPORTANT: Comment out for production! Mock storage is for testing only.
+# os.environ['USE_MOCK_STORAGE'] = 'true'
 
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_file
 from functools import wraps
