@@ -22,6 +22,7 @@ from telethon.tl.functions.users import GetFullUserRequest
 from database import db
 from rate_limiter import RateLimiter
 from proxy_manager import ProxyManager
+from campaign_worker import CampaignCoordinator
 import config
 
 # Account management - use database instead of mock_sheets
@@ -1132,6 +1133,79 @@ def start_campaign(campaign_id):
     thread.start()
 
     return jsonify({'success': True, 'message': 'Campaign started'})
+
+
+@app.route('/campaigns/<int:campaign_id>/continue', methods=['POST'])
+@login_required
+def continue_campaign(campaign_id):
+    """Continue a stopped or paused campaign"""
+    campaign = db.get_campaign(campaign_id)
+
+    if not campaign:
+        return jsonify({'error': 'Campaign not found'}), 404
+
+    if campaign['status'] not in ['stopped', 'paused', 'failed']:
+        return jsonify({'error': 'Campaign cannot be continued (only stopped/paused/failed campaigns)'}), 400
+
+    # Reset stop flag
+    campaign_stop_flags[campaign_id] = False
+
+    # Update status to running
+    db.update_campaign(campaign_id, status='running')
+    db.add_campaign_log(campaign_id, 'Campaign continued', level='info')
+
+    # Start campaign in background thread
+    thread = threading.Thread(target=run_campaign_task, args=(campaign_id,), daemon=True)
+    thread.start()
+
+    return jsonify({'success': True, 'message': 'Campaign continued'})
+
+
+@app.route('/campaigns/<int:campaign_id>/restart', methods=['POST'])
+@login_required
+def restart_campaign(campaign_id):
+    """Restart a campaign from the beginning"""
+    campaign = db.get_campaign(campaign_id)
+
+    if not campaign:
+        return jsonify({'error': 'Campaign not found'}), 404
+
+    if campaign['status'] == 'running':
+        return jsonify({'error': 'Campaign is still running. Stop it first.'}), 400
+
+    # Reset campaign state
+    try:
+        # Reset all account limits for this campaign
+        db.reset_account_campaign_limits(campaign_id)
+        
+        # Reset all 'sent' users back to 'new' status
+        affected = db.reset_campaign_users_for_restart(campaign_id)
+        
+        # Reset campaign counters
+        db.update_campaign(campaign_id, sent_count=0, failed_count=0, status='running')
+        
+        # Log restart
+        db.add_campaign_log(
+            campaign_id, 
+            f'Campaign restarted: {affected} users reset to new status, all account limits cleared', 
+            level='info'
+        )
+        
+        # Reset stop flag
+        campaign_stop_flags[campaign_id] = False
+
+        # Start campaign in background thread
+        thread = threading.Thread(target=run_campaign_task, args=(campaign_id,), daemon=True)
+        thread.start()
+
+        return jsonify({
+            'success': True, 
+            'message': f'Campaign restarted: {affected} users reset',
+            'affected_users': affected
+        })
+    except Exception as e:
+        db.add_campaign_log(campaign_id, f'Restart failed: {str(e)}', level='error')
+        return jsonify({'error': f'Restart failed: {str(e)}'}), 500
 
 
 @app.route('/campaigns/<int:campaign_id>/stop', methods=['POST'])
