@@ -23,6 +23,7 @@ from database import db
 from rate_limiter import RateLimiter
 from proxy_manager import ProxyManager
 from campaign_worker import CampaignCoordinator
+from campaign_runner_v2 import run_campaign_task_v2
 import config
 
 # Account management - use database instead of mock_sheets
@@ -1128,8 +1129,8 @@ def start_campaign(campaign_id):
     db.update_campaign(campaign_id, status='running')
     db.add_campaign_log(campaign_id, 'Campaign started', level='info')
 
-    # Start campaign in background thread
-    thread = threading.Thread(target=run_campaign_task, args=(campaign_id,), daemon=True)
+    # Start campaign in background thread with new worker pool system
+    thread = threading.Thread(target=run_campaign_task_v2, args=(campaign_id,), daemon=True)
     thread.start()
 
     return jsonify({'success': True, 'message': 'Campaign started'})
@@ -1154,8 +1155,8 @@ def continue_campaign(campaign_id):
     db.update_campaign(campaign_id, status='running')
     db.add_campaign_log(campaign_id, 'Campaign continued', level='info')
 
-    # Start campaign in background thread
-    thread = threading.Thread(target=run_campaign_task, args=(campaign_id,), daemon=True)
+    # Start campaign in background thread with new worker pool system
+    thread = threading.Thread(target=run_campaign_task_v2, args=(campaign_id,), daemon=True)
     thread.start()
 
     return jsonify({'success': True, 'message': 'Campaign continued'})
@@ -1194,8 +1195,8 @@ def restart_campaign(campaign_id):
         # Reset stop flag
         campaign_stop_flags[campaign_id] = False
 
-        # Start campaign in background thread
-        thread = threading.Thread(target=run_campaign_task, args=(campaign_id,), daemon=True)
+        # Start campaign in background thread with new worker pool system
+        thread = threading.Thread(target=run_campaign_task_v2, args=(campaign_id,), daemon=True)
         thread.start()
 
         return jsonify({
