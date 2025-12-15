@@ -17,6 +17,13 @@
         <button class="btn btn-danger" onclick="stopCampaign()">
             <i class="bi bi-stop-fill"></i> Stop Campaign
         </button>
+        {% elif campaign.status in ['stopped', 'paused', 'failed'] %}
+        <button class="btn btn-success" onclick="continueCampaign()">
+            <i class="bi bi-play-circle"></i> Continue
+        </button>
+        <button class="btn btn-warning" onclick="restartCampaign()">
+            <i class="bi bi-arrow-clockwise"></i> Restart
+        </button>
         {% endif %}
         <a href="{{ url_for('campaigns') }}" class="btn btn-outline-secondary">Back to Campaigns</a>
     </div>
@@ -195,6 +202,50 @@ function stopCampaign() {
             setTimeout(() => location.reload(), 2000);
         } else {
             alert('Error: ' + (data.error || 'Failed to stop campaign'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+    });
+}
+
+function continueCampaign() {
+    if (!confirm('Continue this campaign from where it stopped?')) {
+        return;
+    }
+    
+    fetch("{{ url_for('continue_campaign', campaign_id=campaign.id) }}", {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Campaign will continue from where it stopped.');
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to continue campaign'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+    });
+}
+
+function restartCampaign() {
+    if (!confirm('⚠️ RESTART CAMPAIGN\\n\\nThis will:\\n• Reset all account limits\\n• Reset all sent users back to new status\\n• Start the campaign from the beginning\\n\\nAre you sure?')) {
+        return;
+    }
+    
+    fetch("{{ url_for('restart_campaign', campaign_id=campaign.id) }}", {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Campaign restarted! ' + data.affected_users + ' users reset to new status.');
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to restart campaign'));
         }
     })
     .catch(error => {
