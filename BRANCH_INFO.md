@@ -1,23 +1,32 @@
-# Информация о текущей ветке / Current Branch Information
+# Информация о ветках репозитория / Repository Branch Information
 
-## Текущая активная ветка / Current Active Branch
+## Основная ветка / Main Branch
 
-**Ветка:** `copilot/current-branch-query`
+**Основная ветка репозитория:** `main`
 
-## Branch Information
+The default branch of this repository is: `main`
 
-- **Current Branch:** `copilot/current-branch-query`
-- **Remote:** `origin/copilot/current-branch-query`
-- **Status:** Up to date with remote
-- **Latest Commit:** Initial plan
+## Как проверить текущую ветку / How to Check Current Branch
+
+Чтобы узнать, на какой ветке вы сейчас работаете, используйте:
+
+To find out which branch you are currently working on, use:
+
+```bash
+git branch
+# или / or
+git status
+```
 
 ## Структура веток / Branch Structure
 
-На данный момент в репозитории существует только одна ветка:
-- `copilot/current-branch-query` - текущая рабочая ветка
+Репозиторий использует стандартную структуру веток:
+- `main` - основная ветка для стабильного кода
+- Рабочие ветки создаются для конкретных задач и изменений
 
-Currently, there is only one branch in the repository:
-- `copilot/current-branch-query` - current working branch
+The repository uses a standard branch structure:
+- `main` - main branch for stable code
+- Working branches are created for specific tasks and changes
 
 ## Примечания / Notes
 
